@@ -4,6 +4,11 @@ bin/
 .gradle/
 **/.gradle/
 
+# ========== Gradle 包装器（Forge MDK 官方通用文件，不入库；本地保留用于构建）==========
+gradle/
+gradlew
+gradlew.bat
+
 # ========== 本地日志 / 临时文件 ==========
 build_output.log
 build.log
