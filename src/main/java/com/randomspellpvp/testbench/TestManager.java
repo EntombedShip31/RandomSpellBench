@@ -1,0 +1,239 @@
+package com.randomspellpvp.testbench;
+
+import com.randomspellpvp.Config;
+import com.randomspellpvp.capability.AssignMode;
+import com.randomspellpvp.capability.PlayerConfigStore;
+import com.randomspellpvp.capability.PlayerSpellConfig;
+import com.randomspellpvp.RandomSpellPVP;
+import com.randomspellpvp.events.PermissionHelper;
+import com.randomspellpvp.equipment.EquipmentManager;
+import com.randomspellpvp.network.NetworkHandler;
+import com.randomspellpvp.network.packet.S2CAssignedSpellsPacket;
+import com.randomspellpvp.spell.AssignedSpell;
+import com.randomspellpvp.spell.RandomAssignmentEngine;
+import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.TextColor;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
+
+import java.util.List;
+
+/**
+ * 测试台流程编排（服务端权威）。
+ *
+ * 简化后保留：随机分配 / 撤销 / 切换聊天播报 / 生成法术卷轴 / 长按学习法术。
+ * 已移除：恢复状态、传送测试点、搭建场地、清空法术书、只给选中法术、全部/顺序分配模式、DPS 统计。
+ */
+public final class TestManager {
+    /** actionbar 一行最多展示几个法术名（超出折叠）。 */
+    private static final int RESULT_PREVIEW = 4;
+
+    private TestManager() {
+    }
+
+    // ---------------- 分配 ----------------
+
+    public static void randomize(ServerPlayer player) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        // curios + spellbook 槽缺失检测：塞背包后 ISS 法术书不生效，给玩家明确前置依赖提示
+        if (!EquipmentManager.hasSpellbookSlot(player)) {
+            feedback(player, Component.translatable("command.randomspellbench.error.no_curios_slot")
+                    .withStyle(ChatFormatting.RED), false);
+        }
+        assign(player, PlayerConfigStore.get(player));
+    }
+
+    private static void assign(ServerPlayer player, PlayerSpellConfig config) {
+        RandomAssignmentEngine.Result result = RandomAssignmentEngine.assign(player, config);
+        if (!result.success()) {
+            feedback(player, Component.translatable(result.message()), true);
+            return;
+        }
+        config.setAssignedSpells(result.spells());
+        config.setAssigned(true);
+        PlayerConfigStore.save(player, config);
+        afterAssign(player, config, result.spells());
+    }
+
+    /** 复现上一次分配结果（不重抽，把上次那批重新写入法术书）。 */
+    public static void repeatLast(ServerPlayer player) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        if (config.getAssignedSpells().isEmpty()) {
+            feedback(player, Component.translatable("command.randomspellbench.error.no_last"), true);
+            return;
+        }
+        RandomAssignmentEngine.Result result =
+                RandomAssignmentEngine.assignExact(player, config, config.getAssignedSpells());
+        if (!result.success()) {
+            feedback(player, Component.translatable(result.message()), true);
+            return;
+        }
+        PlayerConfigStore.save(player, config);
+        afterAssign(player, config, result.spells());
+    }
+
+    /** 撤销到上一套结果。 */
+    public static void undo(ServerPlayer player) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        RandomAssignmentEngine.Result result = RandomAssignmentEngine.undo(player, config);
+        if (!result.success()) {
+            feedback(player, Component.translatable(result.message()), true);
+            return;
+        }
+        config.setAssigned(true);
+        PlayerConfigStore.save(player, config);
+        afterAssign(player, config, result.spells());
+    }
+
+    /** 把选中法术生成成 ISS 卷轴并交给玩家（背包优先，放不下丢脚下）。 */
+    public static void spawnScroll(ServerPlayer player, AbstractSpell spell, int level) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        int lv = level > 0 ? level : config.effectiveRange(spell).randomLevel(player.getRandom());
+        ItemStack scroll = RandomAssignmentEngine.buildScroll(spell, lv, player, player.getRandom());
+        if (scroll.isEmpty()) {
+            feedback(player, Component.translatable("command.randomspellbench.error.no_scroll"), true);
+            return;
+        }
+        boolean added = player.getInventory().add(scroll);
+        if (!added) {
+            player.level().addFreshEntity(new net.minecraft.world.entity.item.ItemEntity(
+                    player.level(), player.getX(), player.getY() + 0.5, player.getZ(), scroll));
+        }
+        feedback(player, Component.translatable("command.randomspellbench.scroll.done",
+                spell.getDisplayName(player), lv), true);
+    }
+
+    /**
+     * 让玩家永久学习选中法术（仿照 ISS 原版：长按法术图标 1.5 秒）。
+     * 服务端通过反射调用 SyncedSpellData.learnSpell（该类不在 ISS api jar 中）。
+     */
+    public static void learnSpell(ServerPlayer player, AbstractSpell spell) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        boolean ok = com.randomspellpvp.events.SpellLearnHelper.learn(player, spell);
+        if (ok) {
+            feedback(player, Component.translatable("command.randomspellbench.learn.done",
+                    spell.getDisplayName(player)).withStyle(ChatFormatting.GREEN), true);
+        } else {
+            feedback(player, Component.translatable("command.randomspellbench.learn.failed",
+                    spell.getDisplayName(player)).withStyle(ChatFormatting.RED), true);
+        }
+    }
+
+    private static void afterAssign(ServerPlayer player, PlayerSpellConfig config, List<AssignedSpell> spells) {
+        // resetOnRandomize：分配后回满血/饱食/清 buff/清 ISS 冷却（配置默认 true，之前完全未生效）
+        if (Config.SERVER.resetOnRandomize.get()) {
+            resetPlayerAfterAssign(player);
+        }
+        NetworkHandler.sendToPlayer(new S2CAssignedSpellsPacket(true, spells), player);
+        if (config.isShowResultInChat()) {
+            sendResult(player, spells);
+        }
+    }
+
+    /** 分配后的回血/清冷却/解 buff 复位（服务端主线程调用）。 */
+    private static void resetPlayerAfterAssign(ServerPlayer player) {
+        try {
+            player.setHealth(player.getMaxHealth());
+            player.getFoodData().setFoodLevel(20);
+            player.getFoodData().setSaturation(5f);
+            player.removeAllEffects();
+            // ISS 冷却/复唱统一交给 MagicCompat（精确方法名优先 + 兼容兜底），
+            // 避免在本类内重复实现一套反射逻辑导致两处行为不一致。
+            io.redspace.ironsspellbooks.api.magic.MagicData magicData =
+                    io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(player);
+            com.randomspellpvp.compat.MagicCompat.clearCooldowns(magicData);
+            com.randomspellpvp.compat.MagicCompat.clearRecasts(magicData);
+        } catch (Throwable t) {
+            RandomSpellPVP.LOGGER.warn("resetOnRandomize failed for {}: {}",
+                    player.getName().getString(), t.toString());
+        }
+    }
+
+    // ---------------- 其它操作 ----------------
+
+    /** 切换「分配后在 actionbar 列出结果」。 */
+    public static boolean toggleChatResult(ServerPlayer player) {
+        // 与其它操作保持一致的权限边界：无权限玩家不得改动聊天播报设置
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return PlayerConfigStore.get(player).isShowResultInChat();
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        boolean next = !config.isShowResultInChat();
+        config.setShowResultInChat(next);
+        PlayerConfigStore.save(player, config);
+        feedback(player, Component.translatable(next
+                        ? "command.randomspellbench.chat.on" : "command.randomspellbench.chat.off")
+                .withStyle(next ? ChatFormatting.GREEN : ChatFormatting.GRAY), true);
+        return next;
+    }
+
+    // ---------------- 结果展示（actionbar 一行小字，不入聊天栏） ----------------
+
+    /**
+     * 在 actionbar 用一行小字播报结果：
+     * - 标题「获得 N 个法术」 + 前几个法术名 + 超出折叠为「(+K)」。
+     * - 不进聊天栏，避免遮罩施法轮盘。
+     */
+    private static void sendResult(ServerPlayer player, List<AssignedSpell> spells) {
+        if (spells.isEmpty()) {
+            return;
+        }
+        MutableComponent preview = Component.literal("");
+        int shown = Math.min(RESULT_PREVIEW, spells.size());
+        for (int i = 0; i < shown; i++) {
+            if (i > 0) {
+                preview.append(Component.literal(", ").withStyle(ChatFormatting.GRAY));
+            }
+            preview.append(format(spells.get(i), player));
+        }
+        if (spells.size() > shown) {
+            preview.append(Component.literal(" (+" + (spells.size() - shown) + ")")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+        }
+        player.displayClientMessage(preview, true);
+    }
+
+    private static MutableComponent format(AssignedSpell entry, ServerPlayer player) {
+        AbstractSpell spell = entry.spell();
+        if (spell == null) {
+            return Component.literal(entry.spellId()).withStyle(ChatFormatting.GRAY);
+        }
+        MutableComponent name = spell.getDisplayName(player).copy();
+        TextColor color = spell.getSchoolType().getDisplayName().getStyle().getColor();
+        if (color != null) {
+            name.setStyle(name.getStyle().withColor(color));
+        }
+        return name.append(Component.literal(" Lv" + entry.level()).withStyle(ChatFormatting.GRAY));
+    }
+
+    /** 统一反馈通道：success 进 actionbar，error 进聊天栏（红色）。 */
+    private static void feedback(ServerPlayer player, Component component, boolean success) {
+        if (success) {
+            player.displayClientMessage(component, true);
+        } else {
+            player.sendSystemMessage(component);
+        }
+    }
+}

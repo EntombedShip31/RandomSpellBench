@@ -1,0 +1,150 @@
+plugins {
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = mod_version
+group = mod_group_id
+// Forge 模组加载器要求 jar 文件名必须是 ASCII（否则启动时崩溃），
+// 中文的模组显示名放在 mods.toml 的 displayName 里即可。
+base {
+    archivesName = "randomspellbench"
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    copyIdeResources = true
+
+    runs {
+        client {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'forge.enabledGameTestNamespaces', mod_id
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+        server {
+            workingDirectory project.file('run-server')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            property 'forge.enabledGameTestNamespaces', mod_id
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+        data {
+            workingDirectory project.file('run-data')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+repositories {
+    maven { name = "Iron's Maven - Release"; url = "https://code.redspace.io/releases" }
+    maven { name = "Iron's Maven - Snapshots"; url = "https://code.redspace.io/snapshots" }
+    maven { name = "TheIllusiveC4 Maven"; url = "https://maven.theillusivec4.top" }
+    maven { name = "Kosmos Maven"; url = "https://maven.kosmx.dev/" }
+    maven { name = "GeckoLib Maven"; url = "https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/" }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // ---------- ISS（Iron's Spells 'n Spellbooks）----------
+    // 稳定 API 包（仅含 io.redspace.ironsspellbooks.api.*），编译期使用
+    compileOnly fg.deobf("io.redspace:irons_spellbooks:${irons_spells_version}:api")
+    // 完整模组（运行时）
+    runtimeOnly fg.deobf("io.redspace:irons_spellbooks:${irons_spells_version}")
+
+    // ---------- Curios API（法术书槽位）----------
+    implementation fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}:api")
+    runtimeOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}")
+
+    // ---------- ISS 的运行时前置（开发环境需要，否则 runClient/runServer 会崩溃）----------
+    runtimeOnly fg.deobf("software.bernie.geckolib:geckolib-forge-${geckolib_version}")
+    implementation fg.deobf("dev.kosmx.player-anim:player-animation-lib-forge:${player_animator_version}")
+    compileOnly fg.deobf("top.theillusivec4.caelus:caelus-forge:${caelus_version}:api")
+    runtimeOnly fg.deobf("top.theillusivec4.caelus:caelus-forge:${caelus_version}")
+}
+
+def resourceTargets = ['META-INF/mods.toml', 'pack.mcmeta']
+def replaceProperties = [
+        minecraft_version   : minecraft_version,
+        minecraft_version_range: minecraft_version_range,
+        forge_version       : forge_version,
+        forge_version_range : forge_version_range,
+        loader_version_range: loader_version_range,
+        mod_id              : mod_id,
+        mod_name            : mod_name,
+        mod_version         : mod_version,
+        mod_authors         : mod_authors,
+        mod_license         : mod_license,
+        mod_issue_tracker   : mod_issue_tracker
+]
+processResources {
+    inputs.properties replaceProperties
+    filesMatching(resourceTargets) { expand replaceProperties }
+    filesMatching('*.mixins.json') { expand replaceProperties }
+}
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'     : project.base.archivesName.get(),
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.base.archivesName.get(),
+                'Implementation-Version'  : project.jar.archiveVersion,
+                'Implementation-Vendor'   : mod_authors,
+                'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+}
+
+jar.finalizedBy('reobfJar')
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// 复制 mod jar 到指定目录（默认指向 PCL2 自带的 1.20.1-Forge_47.4.10 实例）。
+// 可通过命令行覆盖：./gradlew build -Ppcl2_mods_dir=D:/some/mods
+ext.installPath = (project.findProperty('pcl2_mods_dir') ?: 'D:/PCL2/.minecraft/versions/1.20.1-Forge_47.4.10/mods').toString()
+
+tasks.register('copyToMinecraftMods') {
+    group = 'distribution'
+    description = 'Copy the reobfuscated mod jar to the configured Minecraft mods directory.'
+    dependsOn reobfJar
+    doLast {
+        def src = file("build/libs/${project.base.archivesName.get()}-${mod_version}.jar")
+        if (src.exists()) {
+            copy {
+                from src
+                into installPath
+            }
+            logger.lifecycle("Copied ${src.name} -> ${installPath}")
+        } else {
+            logger.warn("Source jar not found: ${src}")
+        }
+    }
+}
+
+tasks.named('build').configure {
+    dependsOn copyToMinecraftMods
+}

@@ -1,0 +1,53 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+issueTrackerURL="${mod_issue_tracker}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="随机法术测试台"
+authors="${mod_authors}"
+description='''
+§b§l随机法术测试台 §8v${mod_version}
+§7Iron's Spells 'n Spellbooks（铁魔法）附属模组 —— 面向创造模式的法术测试台。
+
+§a■ §e法术池§7：搜索、施法类型过滤、法术图标、权重调整（左键+1/右键-1）
+§a■ §e分配模式§7：随机抽取（可选每学派至少1个）/ 全部写入 / 顺序遍历
+§a■ §e等级规则§7：范围内随机，或固定等级对比同一法术不同强度
+§a■ §e法术书§7：随机取自铁魔法模组的法术书，并以你的名字命名
+§a■ §e快捷操作§7：只给选中法术、生成法术卷轴、撤销、清空、恢复状态、一键搭建测试场地
+§a■ §e测试场地§7：石砖平台+围墙+自动重生的训练靶，/rspvp dps 查看最近10秒伤害统计
+§a■ §e分配后§7：自动回满血蓝并清空冷却，聊天栏逐条列出结果
+
+§6按 K 键，或输入 §e/rspvp config §6打开测试台
+'''
+
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="irons_spellbooks"
+    mandatory=true
+    # 需要 3.15.0+（该版本起 1.20.1 分支采用 Mutable/Immutable 法术容器 API）
+    versionRange="[1.20.1-3.15.0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="curios"
+    mandatory=true
+    versionRange="[5.4.7,)"
+    ordering="AFTER"
+    side="BOTH"

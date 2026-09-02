@@ -1,0 +1,27 @@
+# ========== Gradle / 构建产物 ==========
+/build/
+bin/
+.gradle/
+**/.gradle/
+
+# ========== 本地日志 / 临时文件 ==========
+build_output.log
+build.log
+build.pid
+wrapper.log
+nul)
+
+# ========== 本地依赖 jar（不参与版本控制） ==========
+iss_ponder-forge1.20.1-1.0.3-all.jar
+
+# ========== IDE ==========
+*.iml
+.idea/
+.vscode/
+
+# ========== 本地工具数据 ==========
+.codebuddy/
+
+# ========== OS ==========
+Thumbs.db
+.DS_Store
