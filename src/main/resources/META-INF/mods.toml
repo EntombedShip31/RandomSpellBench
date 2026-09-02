@@ -8,6 +8,8 @@ modId="${mod_id}"
 version="${mod_version}"
 displayName="随机法术测试台"
 authors="${mod_authors}"
+logoFile="icon.png"
+logoBlur=false
 description='''
 §b§l随机法术测试台 §8v${mod_version}
 §7Iron's Spells 'n Spellbooks（铁魔法）附属模组 —— 面向创造模式的法术测试台。
@@ -17,10 +19,10 @@ description='''
 §a■ §e等级规则§7：范围内随机，或固定等级对比同一法术不同强度
 §a■ §e法术书§7：随机取自铁魔法模组的法术书，并以你的名字命名
 §a■ §e快捷操作§7：只给选中法术、生成法术卷轴、撤销、清空、恢复状态、一键搭建测试场地
-§a■ §e测试场地§7：石砖平台+围墙+自动重生的训练靶，/rspvp dps 查看最近10秒伤害统计
+§a■ §e测试场地§7：石砖平台+围墙+自动重生的训练靶，/rsta dps 查看最近10秒伤害统计
 §a■ §e分配后§7：自动回满血蓝并清空冷却，聊天栏逐条列出结果
 
-§6按 K 键，或输入 §e/rspvp config §6打开测试台
+§6按 K 键，或输入 §e/rsta config §6打开测试台
 '''
 
 [[dependencies.${mod_id}]]
