@@ -23,6 +23,9 @@ import java.util.function.Function;
 public class SliderWidget extends AbstractWidget {
     /** 标签区占宽度的比例。 */
     private static final double LABEL_RATIO = 0.56;
+    /** 把手尺寸：小方块，不再做成占满行高的「大按钮」（与左侧法术池勾选框的修法一致）。 */
+    private static final int KNOB_W = 3;
+    private static final int KNOB_H = 6;
 
     private double minValue;
     private double maxValue;
@@ -33,6 +36,15 @@ public class SliderWidget extends AbstractWidget {
     private final Consumer<Double> onCommit;
     private double value;
     private double lastCommitted;
+    /**
+     * 自持拖动状态：不复用父类 AbstractWidget 的 dragging 字段。
+     *
+     * 父类那套状态机只有 AbstractSlider 会正确收尾（mouseReleased 里置回 false），
+     * 自定义滑块一旦用错，拖动结束后标志会残留为 true；
+     * 而事件是被容器广播的，残留者会抢走后续所有拖动
+     * （表现为：拖动下面任意滑块，实际改的却是法术数量）。
+     */
+    private boolean dragging = false;
 
     public SliderWidget(int x, int y, int width, int height,
                         double minValue, double maxValue, double currentValue, double stepSize,
@@ -101,8 +113,8 @@ public class SliderWidget extends AbstractWidget {
         Minecraft mc = Minecraft.getInstance();
         boolean enabled = this.active;
 
-        // 底衬（暖色深灰）
-        g.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), enabled ? 0xCC1A1308 : 0x99110D06);
+        // 注意：这里不再画「整行底衬 + 上下边框」。
+        // 那两层让滑块看起来像个大方块按钮，既压住下方控件、也不符合滑条应有的细长外观。
 
         // 标签 + 数值（左侧，永不与把手重叠）
         if (displayMapper != null) {
@@ -112,45 +124,79 @@ public class SliderWidget extends AbstractWidget {
                     getX() + 3, getY() + (getHeight() - mc.font.lineHeight) / 2 + 1, textColor, false);
         }
 
-        // 轨道（右侧）
+        // 轨道（右侧细线）
         int tx0 = trackStart();
         int tx1 = trackEnd();
         int trackY = getY() + getHeight() / 2 - 1;
         g.fill(tx0, trackY, tx1, trackY + 2, enabled ? 0xFF3A2C14 : 0xFF241C0C);
 
         double ratio = (value - minValue) / Math.max(1e-6, maxValue - minValue);
-        int usable = Math.max(1, tx1 - tx0 - 3);
+        int usable = Math.max(1, tx1 - tx0 - KNOB_W);
         int fillWidth = (int) Math.round(usable * ratio);
         g.fill(tx0, trackY, tx0 + fillWidth, trackY + 2, enabled ? 0xFFFF8C00 : 0xFF7A4A12);
 
-        // 把手（橙色）
+        // 把手：与轨道居中的小方块，不再占满整行高度
         int knobX = tx0 + fillWidth;
+        int knobY = trackY + 1 - KNOB_H / 2;
         int knobColor = enabled ? (isHoveredOrFocused() ? 0xFFFFD699 : 0xFFFFA53D) : 0xFF66552E;
-        g.fill(knobX, getY() + 2, knobX + 3, getY() + getHeight() - 2, knobColor);
-
-        // 边框（暗橙）
-        g.fill(getX(), getY(), getX() + getWidth(), getY() + 1, 0xFF6B3D0C);
-        g.fill(getX(), getY() + getHeight() - 1, getX() + getWidth(), getY() + getHeight(), 0xFF6B3D0C);
+        g.fill(knobX, knobY, knobX + KNOB_W, knobY + KNOB_H, knobColor);
     }
 
+    /**
+     * 按下：只有「本控件可见可用 + 指针落在本矩形内 + 落在轨道上」才开始拖动。
+     *
+     * 不再走父类的 onClick，避免父类在 onClick 之外额外改动 dragging 状态。
+     */
     @Override
-    public void onClick(double mouseX, double mouseY) {
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (button != 0 || !this.active || !this.visible) {
+            return false;
+        }
+        if (!isMouseOver(mouseX, mouseY) || !isInTrack(mouseX)) {
+            return false;
+        }
+        this.dragging = true;
         applyFromMouse(mouseX);
         onChange.accept(value);
         commit();
+        return true;
     }
 
+    /** 点击位置是否落在轨道内（含少量边距，便于点中端点）。 */
+    private boolean isInTrack(double mouseX) {
+        return mouseX >= trackStart() - 2 && mouseX <= trackEnd() + 2;
+    }
+
+    /**
+     * 拖动：只在本控件处于拖动中时响应，且不再要求指针停在轨道内——
+     * 拖出轨道/面板只是把数值 clamp 到端点，不会「丢手」。
+     */
     @Override
-    protected void onDrag(double mouseX, double mouseY, double dragX, double dragY) {
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (!this.dragging) {
+            return false;
+        }
         applyFromMouse(mouseX);
         onChange.accept(value);
+        return true;
     }
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        boolean handled = super.mouseReleased(mouseX, mouseY, button);
+        if (!this.dragging) {
+            return false;
+        }
+        this.dragging = false;
         commit();
-        return handled;
+        return true;
+    }
+
+    /** 兜底：容器/界面异常收尾时强制结束拖动，避免状态残留。 */
+    public void cancelDrag() {
+        if (this.dragging) {
+            this.dragging = false;
+            commit();
+        }
     }
 
     private void applyFromMouse(double mouseX) {

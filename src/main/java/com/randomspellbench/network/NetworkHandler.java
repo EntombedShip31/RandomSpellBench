@@ -2,6 +2,8 @@ package com.randomspellbench.network;
 
 import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
+import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
+import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2STestActionPacket;
@@ -66,6 +68,13 @@ public final class NetworkHandler {
                 NetworkDirection.PLAY_TO_SERVER);
         register(++id, C2SRequestSyncPacket.class,
                 C2SRequestSyncPacket::encode, C2SRequestSyncPacket::decode, C2SRequestSyncPacket::handle,
+                NetworkDirection.PLAY_TO_SERVER);
+        register(++id, C2SExtractSpellsPacket.class,
+                C2SExtractSpellsPacket::encode, C2SExtractSpellsPacket::decode, C2SExtractSpellsPacket::handle,
+                NetworkDirection.PLAY_TO_SERVER);
+        // 追加的新包一律排在末尾：id 已经发出去的包不能复用，否则旧客户端会解错数据
+        register(++id, C2SImbueSpellPacket.class,
+                C2SImbueSpellPacket::encode, C2SImbueSpellPacket::decode, C2SImbueSpellPacket::handle,
                 NetworkDirection.PLAY_TO_SERVER);
         // S2C
         register(++id, S2CSyncConfigPacket.class,

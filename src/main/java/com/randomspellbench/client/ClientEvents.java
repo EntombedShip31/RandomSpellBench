@@ -2,6 +2,8 @@ package com.randomspellbench.client;
 
 import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.client.gui.SpellConfigScreen;
+import com.randomspellbench.network.NetworkHandler;
+import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -221,6 +223,11 @@ public final class ClientEvents {
 
         if (ClientSetup.OPEN_CONFIG.consumeClick() && phase == Phase.IDLE) {
             openConfigScreen();
+        }
+
+        // 一键拆法术书：按住 GUI 无关，任何界面状态下都可触发（服务端会再校验权限）
+        if (ClientSetup.EXTRACT_SPELLS.consumeClick()) {
+            NetworkHandler.sendToServer(new C2SExtractSpellsPacket(C2SExtractSpellsPacket.From.AUTO));
         }
     }
 

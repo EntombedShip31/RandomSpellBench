@@ -36,8 +36,20 @@ public final class ClientSetup {
             "key.categories.randomspellbench"
     );
 
+    /**
+     * 一键拆法术书：把当前法术书里的法术抄成卷轴放进背包。
+     * 默认 V（1.20.1 原版无占用），与其它模组冲突时可在「选项 → 控制」里改键。
+     */
+    public static final KeyMapping EXTRACT_SPELLS = new KeyMapping(
+            "key.randomspellbench.extract_spells",
+            InputConstants.Type.KEYSYM,
+            GLFW.GLFW_KEY_V,
+            "key.categories.randomspellbench"
+    );
+
     @SubscribeEvent
     public static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_CONFIG);
+        event.register(EXTRACT_SPELLS);
     }
 }

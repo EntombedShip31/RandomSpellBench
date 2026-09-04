@@ -2,6 +2,7 @@ package com.randomspellbench.client.gui.widget;
 
 import com.randomspellbench.capability.PlayerSpellConfig;
 import com.randomspellbench.capability.SpellLevelRange;
+import com.randomspellbench.util.PinyinUtil;
 import io.redspace.ironsspellbooks.api.registry.SchoolRegistry;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.api.spells.CastType;
@@ -133,9 +134,27 @@ public class SpellListWidget extends AbstractWidget {
         return rebuildCount;
     }
 
+    /**
+     * 命中测试：返回指针所在行的法术；分组标题行与空白区域返回 null。
+     *
+     * <p>判定范围严格等于「该行实际绘制出来的矩形」：</p>
+     * <ul>
+     *   <li>纵向：只认真正画出来的行（{@code [rowY, rowY + ROW_HEIGHT)}）。
+     *       被列表底边遮住的半行、最后一行下方的空白都不触发，
+     *       否则鼠标扫过底部时会弹出一个看不见的法术的详情；</li>
+     *   <li>横向：整行除右侧滚动条轨道外都算。不再使用「图标右侧 +50px」的魔法数——
+     *       那个阈值让 tooltip 在长法术名的右半段、名称与等级之间的空白处、
+     *       以及等级文字上都会莫名消失，与整行 hover 高亮的范围也对不上；</li>
+     *   <li>拖动滚动条期间不触发，避免滚动时详情跟着乱闪。</li>
+     * </ul>
+     */
     @Nullable
-    public AbstractSpell getHovered(int mouseX, int mouseY) {
-        if (mouseX < getX() || mouseX >= getX() + getWidth() || mouseY < getY() || mouseY >= getY() + getHeight()) {
+    public AbstractSpell getHovered(double mouseX, double mouseY) {
+        if (draggingScroll) {
+            return null;
+        }
+        if (mouseX < getX() || mouseX >= getX() + getWidth()
+                || mouseY < getY() || mouseY >= getY() + getHeight()) {
             return null;
         }
         // 列表实际绘制行只到 visibleBottom；其下方的区域（被列表底边/遮罩盖住的部分行）
@@ -144,10 +163,8 @@ public class SpellListWidget extends AbstractWidget {
         if (mouseY >= visibleBottom) {
             return null;
         }
-        // tooltip 触发范围缩小到「图标 + 名称左侧 ~50px」，
-        // 避免鼠标扫过右侧等级区或外部滑块时频繁触发 tooltip（每次 hover 会重建 lines 列表）
-        int hoverLimit = getX() + ICON_X_OFF + ICON_W + 50;
-        if (mouseX >= hoverLimit) {
+        // 滚动条轨道不属于任何法术行，移上去不应弹出详情
+        if (maxScroll() > 0 && overScrollbar(mouseX, mouseY)) {
             return null;
         }
         int row = rowIndexAt(mouseY);
@@ -239,10 +256,23 @@ public class SpellListWidget extends AbstractWidget {
                 : "Lv " + range.getMinLevel() + "-" + range.getMaxLevel();
     }
 
+    /**
+     * 匹配搜索词（query 已小写）：
+     * <ol>
+     *   <li>法术 id（英文，如 {@code irons_spellbooks:fireball}）— 始终可搜；</li>
+     *   <li>显示名的搜索键 — 由 {@link PinyinUtil#searchKey} 生成，包含
+     *       「中文原文 + 全拼连写 + 全拼空格 + 首字母」，
+     *       因此「zhaohuanbeijixiong」「zhao huan」「zhbxj」都能命中「召唤北极熊」。</li>
+     * </ol>
+     * 拼音转换是逐字 HashMap 查表，法术名很短，数百个法术在每次按键时重算也无感；
+     * 这里刻意不做缓存，以保证切换语言后显示名变化能立即生效。
+     */
     private boolean matches(AbstractSpell spell, String query) {
-        String name = spell.getDisplayName(Minecraft.getInstance().player).getString().toLowerCase(Locale.ROOT);
-        String id = spell.getSpellId().toLowerCase(Locale.ROOT);
-        return name.contains(query) || id.contains(query);
+        if (spell.getSpellId().toLowerCase(Locale.ROOT).contains(query)) {
+            return true;
+        }
+        String displayName = spell.getDisplayName(Minecraft.getInstance().player).getString();
+        return PinyinUtil.searchKey(displayName).contains(query);
     }
 
     private static int accentOf(SchoolType school) {
@@ -518,8 +548,8 @@ public class SpellListWidget extends AbstractWidget {
         }
         Row r = rows.get(row);
         if (r.isHeader()) {
-            // 左侧勾选框（精准点击，缩小 hit 范围到 CHECK_X_OFF+CHECK_W=12）：
-            if (mouseX < getX() + 12) {
+            // 左侧勾选框（精准点击，hit 范围 = CHECK_X_OFF + CHECK_W = 12px）：
+            if (mouseX < getX() + CHECK_X_OFF + CHECK_W) {
                 delegate.onToggleGroup(r.spells());
             } else {
                 ResourceLocation id = r.groupId();
@@ -537,11 +567,15 @@ public class SpellListWidget extends AbstractWidget {
         if (button != 0) {
             return false;
         }
-        // 勾选框仅在勾选框矩形内可点击（12px），其余区域选中法术
-        if (mouseX < getX() + 12) {
+        // 「真正的选中」与「勾选」统一：
+        //   点击行内任意位置（含勾选框）都先选中该法术（决定生成卷轴 / 思索 / 长按学习用哪个法术），
+        //   只有落在勾选框矩形内（CHECK_X_OFF + CHECK_W = 12px）时才额外切换启用状态。
+        // 修此前两种点击语义割裂的问题——玩家点行空白处看似选中了该法术，
+        // 但真正决定生成卷轴的 selectedSpell 与「上一次勾选的那一行」不一致，
+        // 表现为「生成卷轴生成的还是上一个法术」。
+        delegate.onSelect(spell);
+        if (mouseX < getX() + CHECK_X_OFF + CHECK_W) {
             delegate.onToggle(spell);
-        } else {
-            delegate.onSelect(spell);
         }
         return true;
     }

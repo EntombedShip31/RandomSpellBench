@@ -11,6 +11,7 @@ import com.randomspellbench.network.NetworkHandler;
 import com.randomspellbench.network.packet.S2CAssignedSpellsPacket;
 import com.randomspellbench.spell.AssignedSpell;
 import com.randomspellbench.spell.RandomAssignmentEngine;
+import com.randomspellbench.spell.SpellbookDismantler;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -119,6 +120,42 @@ public final class TestManager {
         }
         feedback(player, Component.translatable("command.randomspellbench.scroll.done",
                 spell.getDisplayName(player), lv), true);
+    }
+
+    /**
+     * 一键拆法术书：把书里的法术抄成卷轴放进背包，并从书里移除。
+     *
+     * 各分支的提示都由 {@link SpellbookDismantler} 判定，这里只负责权限校验与文案播报：
+     * 没有法术书 / 空白法术书 / 全部锁定 / 背包溢出掉落，都有各自明确的提示。
+     */
+    public static void extractSpells(ServerPlayer player, SpellbookDismantler.Source source) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        SpellbookDismantler.Result result = SpellbookDismantler.dismantle(player, source);
+        if (!result.success()) {
+            feedback(player, Component.translatable(result.messageKey())
+                    .withStyle(ChatFormatting.RED), false);
+            return;
+        }
+        MutableComponent msg = Component.translatable(result.dropped() > 0
+                        ? "command.randomspellbench.extract.done_dropped"
+                        : "command.randomspellbench.extract.done",
+                result.extracted(), result.dropped());
+        if (result.locked() > 0) {
+            // 锁定的法术（预设/独特法术书自带）抄不下来，明确告知玩家「没丢，只是留在书里」
+            msg = msg.copy().append(Component.literal(" "))
+                    .append(Component.translatable("command.randomspellbench.extract.locked_kept",
+                            result.locked()).withStyle(ChatFormatting.GRAY));
+        }
+        if (result.bookDropped()) {
+            // 饰品栏拆出的空书连背包都塞不下，只能掉地上——必须说清楚，否则玩家会以为书没了
+            msg = msg.copy().append(Component.literal(" "))
+                    .append(Component.translatable("command.randomspellbench.extract.book_dropped")
+                            .withStyle(ChatFormatting.YELLOW));
+        }
+        feedback(player, msg.withStyle(ChatFormatting.GREEN), true);
     }
 
     /**

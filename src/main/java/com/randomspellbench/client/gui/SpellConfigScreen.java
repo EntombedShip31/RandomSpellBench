@@ -14,12 +14,15 @@ import com.randomspellbench.client.gui.widget.SliderWidget;
 import com.randomspellbench.client.gui.widget.SpellListWidget;
 import com.randomspellbench.network.NetworkHandler;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
+import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
+import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2STestActionPacket;
 import com.randomspellbench.network.packet.C2SUpdateLevelRangePacket;
 import com.randomspellbench.network.packet.C2SUpdateSettingsPacket;
 import com.randomspellbench.network.packet.C2SUpdateSpellFilterPacket;
+import com.randomspellbench.spell.ImbueTarget;
 import com.randomspellbench.spell.SpellPoolManager;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import io.redspace.ironsspellbooks.api.spells.CastType;
@@ -27,6 +30,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -50,7 +54,8 @@ import java.util.List;
  * - 法术池管理（搜索 / 施法类型过滤 / 全选清除 / 每学派至少 1 个）
  * - 等级规则（范围随机 / 固定等级）
  * - 选中法术的独立等级范围（fixed 模式下滑块置灰并给出提示）
- * - 生成卷轴 / 长按学习（Shift 可批量学习全部已选远古巫术）/ 预览 / 聊天播报 / 复现上次
+ * - 生成卷轴 / 长按学习 / 预览 / 聊天播报 / 复现上次 / 一键拆法术书
+ * - 注入法术：把选中法术写进主手 / 副手 / 盔甲四件（等效 ISS 奥术铁砧），并可一键清除
  * - 长按学习进度条附带百分比提示
  */
 public class SpellConfigScreen extends Screen {
@@ -72,22 +77,43 @@ public class SpellConfigScreen extends Screen {
     /** 长按思索进度达到该比例时提前预热 iss_ponder 投影场景（不打开界面）。 */
     private static final float PREVIEW_PREWARM_FRACTION = 0.4f;
 
-    /** 操作按钮行高与行距。 */
-    private static final int ACTION_ROW_HEIGHT = 14;
-    private static final int ACTION_ROW_GAP = 1;
-
-    /**
-     * 底部固定区总高度（从上到下）：
-     * 状态文字(10) + 间距(4) + 操作标题(10) + 间距(4) + 操作按钮列(74, 最多 5 行) + 间距(4) + 随机分配/关闭(16) + 底距(4) = 126。
-     * 同时把「操作」分区从 scroll 区搬到固定区，与状态文字同层，避免与「选中法术」标题视觉上同级。
-     */
-    private static final int FIXED_BOTTOM_RESERVED = 126;
+    /** 段间距：scroll 内容两段之间的纵向留白。 */
+    private static final int SECTION_GAP = 10;
+    /** 段标题占位高度（与 drawSectionLabel 配合）。 */
+    private static final int SECTION_TITLE_H = 10;
+    /** 操作按钮单行高度（与列表里其他滑块/按钮一致）。 */
+    private static final int ROW_H = 14;
+    /** 行间距。 */
+    private static final int ROW_GAP = 3;
+    /** 底部固定按钮区高度：随机分配 + 关闭 + 底距。 */
+    private static final int BOTTOM_BAR_H = 20;
+    /** 面板顶部标题区高度：留出 rightTitle 字 + 上沿空白，scroll 从其下方开始。 */
+    private static final int TOP_BAR_H = 16;
 
     // ---------- 布局（init 时按屏幕尺寸计算） ----------
     private int leftPanelX0, leftPanelY0, leftPanelX1, leftPanelY1;
     private int rightPanelX0, rightPanelY0, rightPanelX1, rightPanelY1;
     private int listX, listY, listW, listH;
-    private int actionAreaYStart;
+
+    /** 右面板 scroll 内容起始 Y：流式重排（reflowRightPanel）的原点。 */
+    private int scrollY0;
+    /**
+     * 各段标题行的 Y，由 reflowRightPanel() 计算并写入。
+     * 渲染时直接读这些字段，不再用「某控件.getY() - 偏移」反推——
+     * 重排后控件 Y 会变，反推会让标题与内容错位。
+     */
+    private int sectionLevelY;
+    private int sectionSpellY;
+    private int sectionActionY;
+    /** 「选中: 法术名」行的 Y。 */
+    private int selectedNameY;
+    /**
+     * 固定等级模式下「选中法术」整段隐藏时，替代提示行（fixed_hint）的 Y。
+     * 同样由 reflowRightPanel() 分配——此前该提示直接沿用 sectionSpellY，
+     * 而固定等级下 sectionSpellY 不会被赋值（保留上一次重排的旧值），
+     * 提示就被画到了旧位置，压在下方「操作」段的按钮上，即「右侧字体错位」。
+     */
+    private int fixedHintY;
 
     private final PlayerSpellConfig config = ClientConfigData.get();
     /**
@@ -121,6 +147,16 @@ public class SpellConfigScreen extends Screen {
     private Button previewButton;
     private Button chatResultButton;
     private Button repeatButton;
+    private Button extractButton;
+
+    /**
+     * 注入目标槽位。纯客户端本地状态：服务端不保存该选择，
+     * 重开界面回到默认的主手（与「记住上次选中法术」不同，槽位选择没有记忆价值）。
+     */
+    private ImbueTarget imbueTarget = ImbueTarget.MAINHAND;
+    private Button imbueTargetButton;
+    private Button imbueButton;
+    private Button unimbueButton;
 
     private Button randomizeButton;
     private Button closeButton;
@@ -176,13 +212,16 @@ public class SpellConfigScreen extends Screen {
                 new SpellListWidget.Delegate() {
                     @Override
                     public boolean isSelected(AbstractSpell spell) {
-                        return selectedSpell == spell;
+                        // 先比引用（热路径，每帧对可见行调用），再按 id 兜底：
+                        // 池重建 / 同步后即使拿到不同的包装实例，行高亮也不会与实际选中项错位
+                        return selectedSpell == spell
+                                || (selectedSpell != null && spell != null
+                                && selectedSpell.getSpellId().equals(spell.getSpellId()));
                     }
 
                     @Override
                     public void onSelect(AbstractSpell spell) {
-                        selectedSpell = spell;
-                        refreshDetail();
+                        selectSpell(spell);
                     }
 
                     @Override
@@ -212,48 +251,45 @@ public class SpellConfigScreen extends Screen {
                 .bounds(leftInnerX + selectAllW + 4, leftPanelY1 - 18, clearAllW, 14).build();
 
         // ---------- 右：测试控制台（ScrollPanel 包装，溢出时启用滚轮） ----------
+        // 整个右面板分三层：顶 [测试控制台 标题] / 中 [scroll: 全部功能] / 底 [随机分配 + 关闭]
+        // scroll 区域大小自动适配屏宽/屏高——只固定底部按钮区高度即可
         int rx = rightPanelX0 + 8;
         int rw = rightPanelX1 - rightPanelX0 - 16;
-        int ry = rightPanelY0 + 16;
-        // 高度预留底部固定区（状态文字 + 操作标题 + 操作按钮列 + 随机分配/关闭），让这些按钮固定在面板底部不参与滚动
-        rightScrollPanel = new ScrollPanel(rx, ry, rw, rightPanelY1 - rightPanelY0 - FIXED_BOTTOM_RESERVED);
+        int panelInnerH = rightPanelY1 - rightPanelY0;
+        scrollY0 = rightPanelY0 + TOP_BAR_H;
+        int scrollH = Math.max(40, panelInnerH - TOP_BAR_H - BOTTOM_BAR_H);
+        rightScrollPanel = new ScrollPanel(rx, scrollY0, rw, scrollH);
         addRenderableWidget(rightScrollPanel);
 
-        countSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1,
+        // 所有控件先占位放在 scrollY0（Y 由 reflowRightPanel() 按可见性流式重排，
+        // 隐藏控件不占位，下方控件自动上移补位，避免空缺处出现大片空白）
+        countSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1,
                 Math.max(1, ClientConfigData.getMaxSpells()), config.getSpellCount(), 1,
                 v -> Component.translatable("screen.randomspellbench.spell_count").append(": " + (int) Math.round(v)),
                 v -> config.setSpellCount(Math.max(1, (int) Math.round(v))),
                 v -> sendSettings()));
-        ry += 17;
 
         minOnePerSchoolButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> toggleMinOnePerSchool())
-                .bounds(rx, ry, rw, 12).build());
-        ry += 15;
-
-        // 等级规则 section 标题（drawFrame 里画）
-        ry += 10;
+                .bounds(rx, scrollY0, rw, 12).build());
 
         levelRangeButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> setLevelMode(LevelMode.RANGE))
-                .bounds(rx, ry, (rw - 4) / 2, 14).build());
+                .bounds(rx, scrollY0, (rw - 4) / 2, ROW_H).build());
         levelFixedButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> setLevelMode(LevelMode.FIXED))
-                .bounds(rx + (rw - 4) / 2 + 4, ry, (rw - 4) / 2, 14).build());
-        ry += 17;
+                .bounds(rx + (rw - 4) / 2 + 4, scrollY0, (rw - 4) / 2, ROW_H).build());
 
-        globalMinSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1, 20,
+        globalMinSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1, 20,
                 config.getGlobalRange().getMinLevel(), 1,
                 v -> Component.translatable("screen.randomspellbench.min_level").append(": " + (int) Math.round(v)),
                 v -> onGlobalRangeChanged(),
                 v -> commitGlobalRange()));
-        ry += 17;
 
-        globalMaxSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1, 20,
+        globalMaxSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1, 20,
                 config.getGlobalRange().getMaxLevel(), 1,
                 v -> Component.translatable("screen.randomspellbench.max_level").append(": " + (int) Math.round(v)),
                 v -> onGlobalRangeChanged(),
                 v -> commitGlobalRange()));
-        ry += 17;
 
-        fixedLevelSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1, 20,
+        fixedLevelSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1, 20,
                 config.getFixedLevel(), 1,
                 v -> Component.translatable("screen.randomspellbench.fixed_level").append(": " + (int) Math.round(v)),
                 v -> {
@@ -261,73 +297,71 @@ public class SpellConfigScreen extends Screen {
                     spellList.rebuild();
                 },
                 v -> sendSettings()));
-        ry += 19;
-
-        // 选中法术 section 标题 + 法术名 两行占位
-        ry += 10;
-        ry += 10;
 
         useGlobalButton = rightScrollPanel.addChild(Button.builder(Component.literal(""), b -> toggleUseGlobal())
-                .bounds(rx, ry, rw, 12).build());
-        ry += 15;
+                .bounds(rx, scrollY0, rw, 12).build());
 
-        spellMinSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1, 20,
+        spellMinSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1, 20,
                 1, 1,
                 v -> Component.translatable("screen.randomspellbench.min_level").append(": " + (int) Math.round(v)),
                 v -> onSpellRangeChanged(),
                 v -> commitSpellRange()));
-        ry += 17;
 
-        spellMaxSlider = rightScrollPanel.addChild(new SliderWidget(rx, ry, rw, 14, 1, 20,
+        spellMaxSlider = rightScrollPanel.addChild(new SliderWidget(rx, scrollY0, rw, ROW_H, 1, 20,
                 1, 1,
                 v -> Component.translatable("screen.randomspellbench.max_level").append(": " + (int) Math.round(v)),
                 v -> onSpellRangeChanged(),
                 v -> commitSpellRange()));
-        ry += 19;
 
-        // 操作按钮已移至底部固定区（详见下方），不再添加到 ScrollPanel：
-        // 这样「操作」标题与按钮都在状态文字下方同一渲染层，不再与「选中法术」标题视觉上同级。
+        // 注入三件套：目标槽位循环按钮 + 注入 + 清除注入。
+        // 刻意排在「生成卷轴」之前——注入与选中法术强相关，和卷轴是同一类操作。
+        imbueTargetButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> cycleImbueTarget())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
 
-        int bottomY = rightPanelY1 - 20;
+        imbueButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_imbue"), b -> imbueSelected())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        unimbueButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_unimbue"), b -> clearImbue())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        scrollButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_scroll"), b -> spawnSelectedScroll())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        learnButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_learn"), b -> {/* 长按逻辑在 tick() */})
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        previewButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_preview"), b -> previewSelected())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        chatResultButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> toggleChatResult())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        repeatButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_repeat"), b -> repeatLast())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        // 一键拆法术书：与选中法术无关，任何时刻都可点（服务端再判权限与是否有书）
+        extractButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_extract"), b -> extractSpellbook())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        // —— 底部固定：随机分配 + 关闭（始终可见，不参与滚动）——
+        int bottomY = rightPanelY1 - 18;
         randomizeButton = Button.builder(Component.translatable("screen.randomspellbench.randomize"), b -> randomize())
                 .bounds(rx, bottomY, (rw - 4) / 2, 16).build();
         closeButton = Button.builder(Component.translatable("screen.randomspellbench.btn_close"), b -> this.onClose())
                 .bounds(rx + (rw - 4) / 2 + 4, bottomY, (rw - 4) / 2, 16).build();
-        // 底部按钮固定在面板底部（不加入 ScrollPanel，滚动时保持可见）
         addRenderableWidget(randomizeButton);
         addRenderableWidget(closeButton);
-
-        // 操作按钮：固定在面板底部，位于「操作」标题与「随机分配/关闭」之间，不随滚动。
-        // 顶部按钮 Y = scroll panel bottom + 4 + 状态文字(10) + 间距(4) + 操作标题(10) + 间距(4)
-        //              = rightPanelY1 - FIXED_BOTTOM_RESERVED + 28
-        actionAreaYStart = rightPanelY1 - FIXED_BOTTOM_RESERVED + 28;
-        scrollButton = Button.builder(Component.translatable("screen.randomspellbench.btn_scroll"), b -> spawnSelectedScroll())
-                .bounds(rx, actionAreaYStart, rw, ACTION_ROW_HEIGHT).build();
-        learnButton = Button.builder(Component.translatable("screen.randomspellbench.btn_learn"), b -> {/* 长按逻辑在 tick() */})
-                .bounds(rx, actionAreaYStart, rw, ACTION_ROW_HEIGHT).build();
-        previewButton = Button.builder(Component.translatable("screen.randomspellbench.btn_preview"), b -> previewSelected())
-                .bounds(rx, actionAreaYStart, rw, ACTION_ROW_HEIGHT).build();
-        chatResultButton = Button.builder(Component.empty(), b -> toggleChatResult())
-                .bounds(rx, actionAreaYStart, rw, ACTION_ROW_HEIGHT).build();
-        repeatButton = Button.builder(Component.translatable("screen.randomspellbench.btn_repeat"), b -> repeatLast())
-                .bounds(rx, actionAreaYStart, rw, ACTION_ROW_HEIGHT).build();
-        addRenderableWidget(scrollButton);
-        addRenderableWidget(learnButton);
-        addRenderableWidget(previewButton);
-        addRenderableWidget(chatResultButton);
-        addRenderableWidget(repeatButton);
 
         addRenderableWidget(searchBox);
         addRenderableWidget(castCycleButton);
         addRenderableWidget(spellList);
         addRenderableWidget(selectAllButton);
         addRenderableWidget(clearAllButton);
-        // 右控制台 widgets 由 rightScrollPanel 转发鼠标事件（已 addRenderableWidget），这里不再重复添加
+        // 操作按钮已在 init() 中 addChild 到 rightScrollPanel（随 scroll 一起渲染）
 
+        // refreshDetail() 末尾会调用 reflowRightPanel()：按当前可见性流式重排 Y 并重算 scroll 高度
         refreshModeButtons();
         refreshDetail();
-        reflowActionButtons();
-        rightScrollPanel.layout();
         // 1) 从 iss_ponder 预览返回：恢复思索前保存的界面状态（优先）
         boolean restored = ClientEvents.consumeReturnState(this);
         // 2) 普通打开（按 K/F6）：恢复上次关闭时记住的列表位置（滚动/搜索/选中/折叠）
@@ -498,11 +532,38 @@ public class SpellConfigScreen extends Screen {
 
     // ======================= 交互 =======================
 
-    /** Shift + 点击「长按学习」：一次性学习全部已启用的远古巫术。 */
+    /**
+     * 兜底转发：焦点未落在滚动面板上时，Screen 不会把拖动事件交给它，
+     * 这里补一次，保证滑块拖动不会因焦点在别处而失效。
+     */
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Shift+长按批量学习全部远古巫术的功能已移除（合规与公平性考量）。
-        return super.mouseClicked(mouseX, mouseY, button);
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (super.mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
+            return true;
+        }
+        return rightScrollPanel != null && rightScrollPanel.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    /**
+     * 兜底收尾：无论指针最后松在哪个位置，都强制结束滚动面板内的拖动。
+     * 防止「拖出面板/窗口外松手」导致拖动状态残留，下一次拖动误改上一个控件。
+     */
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        boolean handled = super.mouseReleased(mouseX, mouseY, button);
+        if (rightScrollPanel != null) {
+            rightScrollPanel.clearDragging();
+        }
+        return handled;
+    }
+
+    /**
+     * 唯一的「选中法术」入口：行内任意位置（勾选框 / 图标 / 名称 / 空白）的点击都汇聚到这里，
+     * 保证高亮行、右侧「选中: xxx」、等级滑块、生成卷轴 / 思索 / 长按学习用的是同一个法术。
+     */
+    private void selectSpell(@Nullable AbstractSpell spell) {
+        selectedSpell = spell;
+        refreshDetail();
     }
 
     private void setLevelMode(LevelMode levelMode) {
@@ -646,6 +707,42 @@ public class SpellConfigScreen extends Screen {
         closeIfConfigured();
     }
 
+    /**
+     * 一键拆法术书：全部交给服务端处理（查找顺序、卷轴生成、背包溢出掉落、饰品栏摘除）。
+     * 这里故意不关界面 —— 结果提示会走 actionbar，关掉反而看不到。
+     */
+    private void extractSpellbook() {
+        NetworkHandler.sendToServer(new C2SExtractSpellsPacket(C2SExtractSpellsPacket.From.AUTO));
+    }
+
+    /** 循环切换注入目标（主手 → 副手 → 头盔 → 胸甲 → 护腿 → 靴子）。 */
+    private void cycleImbueTarget() {
+        imbueTarget = imbueTarget.next();
+        refreshDetail();
+    }
+
+    /**
+     * 注入选中的法术到目标槽位的物品。
+     * 等级沿用「等级规则」的下限（固定等级模式即固定等级），与「点击思索」预览用同一取值，
+     * 避免玩家在 GUI 里看到的等级和实际注入的等级不是同一个。
+     *
+     * 不关界面：注入结果走 actionbar，且玩家通常要连着换目标/换法术继续注。
+     */
+    private void imbueSelected() {
+        if (selectedSpell == null) {
+            return;
+        }
+        int level = config.effectiveRange(selectedSpell).getMinLevel();
+        NetworkHandler.sendToServer(new C2SImbueSpellPacket(
+                C2SImbueSpellPacket.Action.IMBUE, selectedSpell.getSpellId(), level, imbueTarget.key()));
+    }
+
+    /** 清除目标槽位物品上的注入法术（等效原版忏悔石）。 */
+    private void clearImbue() {
+        NetworkHandler.sendToServer(new C2SImbueSpellPacket(
+                C2SImbueSpellPacket.Action.CLEAR, "", 0, imbueTarget.key()));
+    }
+
     /** 长按思索完成：请求 iss_ponder 打开选中法术的演示界面；失败给兜底提示并返回 false。 */
     private boolean previewSelected() {
         if (selectedSpell == null) {
@@ -706,6 +803,15 @@ public class SpellConfigScreen extends Screen {
         return Component.translatable(key).withStyle(active ? ChatFormatting.GREEN : ChatFormatting.GRAY);
     }
 
+    /**
+     * 是否显示「固定等级」提示行：固定等级模式下「选中法术」整段隐藏，
+     * 需要一行文字说明该法术的独立等级范围已停用（未选法术时没有可说明的对象，不显示）。
+     * 布局与渲染共用此判定，避免两边条件不一致导致文字画在没有占位的地方。
+     */
+    private boolean showFixedHint() {
+        return config.getLevelMode() == LevelMode.FIXED && selectedSpell != null;
+    }
+
     private void refreshDetail() {
         boolean hasSelection = selectedSpell != null;
         boolean fixed = config.getLevelMode() == LevelMode.FIXED;
@@ -730,10 +836,24 @@ public class SpellConfigScreen extends Screen {
         previewButton.active = hasSelection;
         learnButton.active = hasSelection && isEldritch(selectedSpell);
         repeatButton.active = !ClientConfigData.getLastResult().isEmpty();
+        // 注入需要选中法术；清除注入不需要（只跟目标槽位有关），因此始终可用
+        imbueButton.active = hasSelection;
+        unimbueButton.active = true;
 
-        // 操作按钮已固定在面板底部（init() 中已按 FIXED_BOTTOM_RESERVED 算出 actionAreaYStart），
-        // spell 区段显隐不再影响其 Y 位置；reflow 只根据当前可见的按钮（远古/ponder）紧凑排列。
-        reflowActionButtons();
+        // 条件按钮：不满足条件时隐藏（隐藏后由 reflowRightPanel 紧凑补位，不留空白）
+        // - 长按学习：仅选中「远古巫术」学派法术时才有意义
+        // - 点击思索：仅 iss_ponder 模组已加载时可用
+        learnButton.visible = hasSelection && isEldritch(selectedSpell);
+        previewButton.visible = PonderCompat.isPonderLoaded();
+        scrollButton.visible = true;
+        chatResultButton.visible = true;
+        repeatButton.visible = true;
+        extractButton.visible = true;
+        extractButton.active = true;
+        imbueTargetButton.visible = true;
+        imbueTargetButton.active = true;
+        imbueButton.visible = true;
+        unimbueButton.visible = true;
 
         minOnePerSchoolButton.setMessage(Component.literal(
                 config.isMinOnePerSchool() ? "[x] " : "[ ] ")
@@ -742,6 +862,9 @@ public class SpellConfigScreen extends Screen {
         chatResultButton.setMessage(Component.translatable("screen.randomspellbench.chat_result",
                 Component.translatable(config.isShowResultInChat()
                         ? "screen.randomspellbench.on" : "screen.randomspellbench.off")));
+
+        imbueTargetButton.setMessage(Component.translatable("screen.randomspellbench.imbue_target",
+                Component.translatable(imbueTarget.translationKey())));
 
         if (hasSelection) {
             SpellFilter filter = config.getFilter(selectedSpell);
@@ -756,48 +879,92 @@ public class SpellConfigScreen extends Screen {
                     .append(Component.translatable("screen.randomspellbench.use_global")));
         }
 
-        // 长按学习按钮（仅远古巫术显示），提示按住时长；Shift 可批量
+        // 长按学习按钮（仅远古巫术显示），提示按住时长（已删除 Shift=全部 批量逻辑）
         learnButton.setMessage(Component.translatable("screen.randomspellbench.btn_learn")
-                .append(" (" + (LEARN_HOLD_MS / 1000) + "." + (LEARN_HOLD_MS % 1000 / 100) + "s)")
-                .append(Component.literal(" ").append(Component.translatable("screen.randomspellbench.btn_learn_shift"))));
+                .append(" (" + (LEARN_HOLD_MS / 1000) + "." + (LEARN_HOLD_MS % 1000 / 100) + "s)"));
 
         // 文案只显示「点击思索」，不再拼接时长后缀（长按行为本身保留）
         previewButton.setMessage(Component.translatable("screen.randomspellbench.btn_preview"));
+
+        // 按当前可见性流式重排 Y：隐藏控件不占位，下方控件自动上移补位
+        reflowRightPanel();
     }
 
     /**
-     * 操作区按钮按可见性自动补位：不显示的按钮跳过，下方按钮紧贴上来。
+     * 右面板流式重排：从 scrollY0 起按固定顺序摆放，只为「可见」控件分配 Y 并推进游标，
+     * 隐藏控件直接跳过（不占任何纵向空间）。
+     *
+     * <p>解决的问题：过去每个控件的 Y 在 init() 里写死，一旦某按钮隐藏
+     * （未加载 iss_ponder 的「点击思索」、非远古巫术的「长按学习」、
+     * 未选法术/固定等级时整段隐藏的「选中法术」），原位置会留下大片空白，
+     * 上下控件间距被撑得很开。现在隐藏即消失，下方控件自动贴上来。</p>
+     *
+     * <p>同时把各段标题行的 Y 写入 sectionLevelY / sectionSpellY / sectionActionY / selectedNameY，
+     * 渲染层直接读这些字段，不再用「某控件.getY() - 偏移」反推（重排后反推会错位）。</p>
      */
-    private void reflowActionButtons() {
-        int y = actionAreaYStart;
-        scrollButton.setY(y);
-        scrollButton.visible = true;
-        y += ACTION_ROW_HEIGHT + ACTION_ROW_GAP;
+    private void reflowRightPanel() {
+        int y = scrollY0;
 
-        boolean eldritch = selectedSpell != null && isEldritch(selectedSpell);
-        if (eldritch) {
-            learnButton.setY(y);
-            learnButton.visible = true;
-            y += ACTION_ROW_HEIGHT + ACTION_ROW_GAP;
-        } else {
-            learnButton.visible = false;
+        // —— 法术数量 ——
+        y = place(countSlider, y, ROW_H);
+        y = place(minOnePerSchoolButton, y, 12);
+
+        // —— 等级规则 ——
+        y += SECTION_GAP;
+        sectionLevelY = y;
+        y += SECTION_TITLE_H;
+        levelRangeButton.setY(y);
+        levelFixedButton.setY(y); // 同行并排两个按钮
+        y += ROW_H + ROW_GAP;
+        y = place(globalMinSlider, y, ROW_H);
+        y = place(globalMaxSlider, y, ROW_H);
+        y = place(fixedLevelSlider, y, ROW_H);
+
+        // —— 选中法术（整段可能隐藏：未选法术 或 固定等级模式）——
+        if (useGlobalButton.visible) {
+            y += SECTION_GAP;
+            sectionSpellY = y;
+            y += SECTION_TITLE_H;
+            selectedNameY = y;
+            y += SECTION_TITLE_H;
+            y = place(useGlobalButton, y, 12);
+            y = place(spellMinSlider, y, ROW_H);
+            y = place(spellMaxSlider, y, ROW_H);
+        } else if (showFixedHint()) {
+            // 固定等级模式下整段隐藏：给「固定等级提示」单独占一行（位置与原区段标题一致）。
+            // 不能沿用 sectionSpellY——本分支里它不会被赋值，保留的旧值会让提示压到下方内容上。
+            y += SECTION_GAP;
+            fixedHintY = y;
+            y += SECTION_TITLE_H;
         }
 
-        boolean ponderLoaded = PonderCompat.isPonderLoaded();
-        if (ponderLoaded) {
-            previewButton.setY(y);
-            previewButton.visible = true;
-            y += ACTION_ROW_HEIGHT + ACTION_ROW_GAP;
-        } else {
-            previewButton.visible = false;
+        // —— 操作 ——
+        y += SECTION_GAP;
+        sectionActionY = y;
+        y += SECTION_TITLE_H;
+        y = place(imbueTargetButton, y, ROW_H);
+        y = place(imbueButton, y, ROW_H);
+        y = place(unimbueButton, y, ROW_H);
+        y = place(scrollButton, y, ROW_H);
+        y = place(learnButton, y, ROW_H);
+        y = place(previewButton, y, ROW_H);
+        y = place(chatResultButton, y, ROW_H);
+        y = place(repeatButton, y, ROW_H);
+        y = place(extractButton, y, ROW_H);
+
+        // 重算内容高度与滚动范围（新 Y 立即生效）
+        rightScrollPanel.layout();
+    }
+
+    /**
+     * 若控件可见则摆到 y 并返回下一行 Y；不可见则原样返回 y（不占纵向空间）。
+     */
+    private static int place(AbstractWidget widget, int y, int height) {
+        if (!widget.visible) {
+            return y;
         }
-
-        chatResultButton.setY(y);
-        chatResultButton.visible = true;
-        y += ACTION_ROW_HEIGHT + ACTION_ROW_GAP;
-
-        repeatButton.setY(y);
-        repeatButton.visible = true;
+        widget.setY(y);
+        return y + height + ROW_GAP;
     }
 
     // ======================= 渲染 =======================
@@ -814,15 +981,27 @@ public class SpellConfigScreen extends Screen {
         drawFrame(g);
         super.render(g, mouseX, mouseY, partialTick);
 
-        // 右面板跟滚动的覆盖层（分区标题 / 选中法术 / 长按进度）：
-        // 跟随 ScrollPanel 的滚动偏移，并裁剪在右面板内，避免溢出污染相邻区域
         int so = rightScrollPanel != null ? rightScrollPanel.getScrollOffset() : 0;
-        g.enableScissor(rightPanelX0, rightPanelY0, rightPanelX1, rightPanelY1);
+        // 滚动内容覆盖层（段标题 / 选中法术 / 状态文字）：裁剪严格限制在 ScrollPanel 区域内，
+        // 不再溢出到上方[测试控制台]标题区 或 下方[随机分配/关闭]固定底栏——
+        // 这是「选中法术」标题/法术名/操作按钮被那两个固定区盖住的根因。
+        g.enableScissor(rightPanelX0, rightPanelY0, rightPanelX1, rightPanelY1 - BOTTOM_BAR_H);
         g.pose().pushPose();
         g.pose().translate(0, -so, 0);
         try {
             drawSectionLabels(g);
             drawLabels(g);
+            drawStatus(g); // 状态文字与「操作」标题同行；放在这里以跟随 scroll 滚动
+        } finally {
+            g.pose().popPose();
+            g.disableScissor();
+        }
+
+        // 长按学习 / 思索进度条画在 ScrollPanel 内（与对应按钮同位置）
+        g.enableScissor(rightPanelX0, rightPanelY0, rightPanelX1, rightPanelY1 - BOTTOM_BAR_H);
+        g.pose().pushPose();
+        g.pose().translate(0, -so, 0);
+        try {
             drawLongPressProgress(g);
             drawPreviewProgress(g);
         } finally {
@@ -830,9 +1009,6 @@ public class SpellConfigScreen extends Screen {
             g.disableScissor();
         }
 
-        // 状态文字 + 操作标题 固定在面板底部（随机分配/关闭按钮上方），不随滚动
-        drawActionHeader(g);
-        drawStatus(g);
         drawHoveredTooltip(g, mouseX, mouseY);
     }
 
@@ -856,23 +1032,28 @@ public class SpellConfigScreen extends Screen {
         }
     }
 
-    /** 右面板分区标题（跟随 rightScrollPanel 滚动）。由 render() 在内容板块内调用。 */
+    /**
+     * 右面板分区标题（跟随 rightScrollPanel 滚动）。由 render() 在内容板块内调用。
+     * Y 直接读 reflowRightPanel() 算好的 sectionLevelY / sectionSpellY / sectionActionY，
+     * 不再用「控件.getY() - 偏移」反推——重排后控件 Y 会变，反推会错位。
+     */
     private void drawSectionLabels(GuiGraphics g) {
         int rx = rightPanelX0 + 8;
-        drawSectionLabel(g, "screen.randomspellbench.section_level", rx, globalMinSlider.getY() - 27);
+        drawSectionLabel(g, "screen.randomspellbench.section_level", rx, sectionLevelY);
         // 「选中法术」区段标题只在区段实际显示时绘制；区段隐藏（未选法术 / 固定等级）时若照旧绘制，
         // 会与下方被拉上来的操作按钮重叠——这正是「直接进入界面错位、点固定法术后消失」的根因。
         if (useGlobalButton.visible) {
-            drawSectionLabel(g, "screen.randomspellbench.section_spell", rx, useGlobalButton.getY() - 20);
+            drawSectionLabel(g, "screen.randomspellbench.section_spell", rx, sectionSpellY);
         }
-        if (config.getLevelMode() == LevelMode.FIXED && selectedSpell != null) {
-            // 固定等级提示：说明为什么下方滑块置灰（画在分区标题右侧，不额外占行）
+        if (showFixedHint()) {
+            // 固定等级提示：说明「选中法术」整段（独立等级范围）为何隐藏。
+            // Y 由 reflowRightPanel() 分配并占好位（fixedHintY），不再借用 sectionSpellY。
             g.drawString(font, Component.translatable("screen.randomspellbench.fixed_hint",
                     config.getFixedLevel()).getString(),
-                    rx + 66, useGlobalButton.getY() - 20, 0xFFB08A55, false);
+                    rx + 6, fixedHintY, 0xFFB08A55, false);
         }
-        // 「操作」分区标题已移至固定区（drawActionHeader），不再在 scroll 区绘制，
-        // 避免与「选中法术」标题视觉上同级。
+        // 「操作」区段标题（与「状态」文字同一行，drawStatus 负责画状态）
+        drawSectionLabel(g, "screen.randomspellbench.section_action", rx, sectionActionY);
     }
 
     private void drawLabels(GuiGraphics g) {
@@ -884,7 +1065,7 @@ public class SpellConfigScreen extends Screen {
 
         // 分两段绘制：先画「选中: 」前缀（灰色），再画法术名（学派色）
         String prefix = Component.translatable("screen.randomspellbench.selected_spell").getString() + ": ";
-        int nameY = useGlobalButton.getY() - 10;
+        int nameY = selectedNameY;
         g.drawString(font, prefix, rx, nameY, COLOR_TEXT, false);
         int prefixWidth = font.width(prefix);
         int rw = rightPanelX1 - rightPanelX0 - 16;
@@ -942,7 +1123,7 @@ public class SpellConfigScreen extends Screen {
             cachedEnabledCount = config.enabledSpellCount(pool);
         }
         int selectedCount = cachedEnabledCount;
-        // 统计移到「清除全部」右侧的空位，避免与左下角按钮重叠
+        // 左侧「已选 N/M」统计（清除全部按钮右侧）
         String countText = Component.translatable(
                 "screen.randomspellbench.selected_count", selectedCount, pool.size()).getString();
         int countX = clearAllButton.getX() + clearAllButton.getWidth() + 6;
@@ -950,32 +1131,28 @@ public class SpellConfigScreen extends Screen {
         int countW = Math.max(0, (leftPanelX1 - 8) - countX);
         g.drawString(font, font.plainSubstrByWidth(countText, countW), countX, countY, 0xFFC0B08A, false);
 
-        String statusKey = ClientConfigData.isAssigned()
-                ? "screen.randomspellbench.status_assigned"
-                : "screen.randomspellbench.status_pending";
-        String status = Component.translatable("screen.randomspellbench.assigned_status",
-                Component.translatable(statusKey).getString()).getString();
-        int last = ClientConfigData.getLastResult().size();
-        if (last > 0) {
-            status += Component.translatable("screen.randomspellbench.last_result", last).getString();
+        // 右侧「操作」标题旁的状态文字：与「操作」同一行，位于其右侧
+        // - 未分配：直接显示「未分配」（不带「状态:」前缀，避免视觉重心压在未操作状态）
+        // - 已分配：显示「状态: 已分配」+「·上次 N 个」（有结果时）
+        String status;
+        if (ClientConfigData.isAssigned()) {
+            status = Component.translatable("screen.randomspellbench.assigned_status",
+                    Component.translatable("screen.randomspellbench.status_assigned").getString()).getString();
+            int last = ClientConfigData.getLastResult().size();
+            if (last > 0) {
+                status += Component.translatable("screen.randomspellbench.last_result", last).getString();
+            }
+        } else {
+            status = Component.translatable("screen.randomspellbench.status_pending").getString();
         }
         int rx = rightPanelX0 + 8;
-        int rw = rightPanelX1 - rightPanelX0 - 16;
-        // 状态文字固定在固定区顶部（操作标题上方），不随滚动
-        int statusY = rightPanelY1 - FIXED_BOTTOM_RESERVED;
-        g.drawString(font, font.plainSubstrByWidth(status, rw), rx, statusY, 0xFFC0B08A, false);
-    }
-
-    /**
-     * 右面板「操作」分区标题：固定在底部固定区，状态文字下方、操作按钮列上方（不随滚动）。
-     * 与 drawSectionLabels() 中绘制的「等级规则」「选中法术」分区标题不在同一渲染层，
-     * 避免视觉上同级。
-     */
-    private void drawActionHeader(GuiGraphics g) {
-        int rx = rightPanelX0 + 8;
-        // 操作标题 Y = 状态文字底部 + 4px 间距
-        int y = rightPanelY1 - FIXED_BOTTOM_RESERVED + 10 + 4;
-        drawSectionLabel(g, "screen.randomspellbench.section_action", rx, y);
+        // 与「操作」标题同一行（sectionActionY 由 reflowRightPanel 计算）
+        int titleY = sectionActionY;
+        // drawSectionLabel 排版：色条 x..x+2，文字从 x+6 起，故状态从标题文字右侧 +10 开始
+        String actionTitle = Component.translatable("screen.randomspellbench.section_action").getString();
+        int statusX = rx + 6 + font.width(actionTitle) + 10;
+        int statusW = Math.max(0, (rightPanelX1 - 8) - statusX);
+        g.drawString(font, font.plainSubstrByWidth(status, statusW), statusX, titleY, 0xFFC0B08A, false);
     }
 
     private void drawHoveredTooltip(GuiGraphics g, int screenX, int screenY) {

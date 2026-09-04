@@ -89,6 +89,16 @@ public class ScrollPanel extends AbstractWidget {
         return true;
     }
 
+    /**
+     * 按下时命中的子控件。拖动/释放只定向派发给它。
+     *
+     * 不能像旧实现那样把事件「广播」给所有 children：
+     * 广播时任意一个残留了 dragging 状态的控件都会抢先应答，
+     * 于是拖动「法术等级」滑块实际改的却是列表里排第一的「法术数量」。
+     */
+    @javax.annotation.Nullable
+    private AbstractWidget draggingChild = null;
+
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!isMouseOver(mouseX, mouseY)) {
@@ -96,7 +106,11 @@ public class ScrollPanel extends AbstractWidget {
         }
         double ty = mouseY + scrollOffset;
         for (AbstractWidget w : children) {
+            if (!w.visible || !w.active) {
+                continue;
+            }
             if (w.mouseClicked(mouseX, ty, button)) {
+                draggingChild = w;
                 return true;
             }
         }
@@ -105,30 +119,37 @@ public class ScrollPanel extends AbstractWidget {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (!isMouseOver(mouseX, mouseY)) {
+        // 拖动期间不再重新命中测试：始终发给按下时命中的控件。
+        // 也不要求指针仍在面板内，否则拖出面板就会「丢手」。
+        if (draggingChild == null) {
             return false;
         }
-        double ty = mouseY + scrollOffset;
-        for (AbstractWidget w : children) {
-            if (w.mouseDragged(mouseX, ty, button, dragX, dragY)) {
-                return true;
-            }
-        }
-        return false;
+        draggingChild.mouseDragged(mouseX, mouseY + scrollOffset, button, dragX, dragY);
+        return true;
     }
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (!isMouseOver(mouseX, mouseY)) {
+        // 释放同样不要求指针在面板内：拖到面板外松手也要正常收尾，
+        // 否则 draggingChild 会残留，下一次拖动就会误改上一个控件。
+        AbstractWidget w = draggingChild;
+        draggingChild = null;
+        if (w == null) {
             return false;
         }
-        double ty = mouseY + scrollOffset;
-        for (AbstractWidget w : children) {
-            if (w.mouseReleased(mouseX, ty, button)) {
-                return true;
-            }
+        w.mouseReleased(mouseX, mouseY + scrollOffset, button);
+        return true;
+    }
+
+    /** 兜底：强制结束进行中的拖动（界面关闭、指针在窗口外松手等场景）。 */
+    public void clearDragging() {
+        AbstractWidget w = draggingChild;
+        draggingChild = null;
+        if (w instanceof SliderWidget slider) {
+            slider.cancelDrag();
+        } else if (w != null) {
+            w.mouseReleased(-1, -1, 0);
         }
-        return false;
     }
 
     @Override

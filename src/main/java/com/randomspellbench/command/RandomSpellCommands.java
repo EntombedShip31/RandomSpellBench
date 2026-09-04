@@ -15,8 +15,11 @@ import com.randomspellbench.network.packet.S2CCloseScreenPacket;
 import com.randomspellbench.network.packet.S2COpenScreenPacket;
 import com.randomspellbench.network.packet.S2CSyncConfigPacket;
 import com.randomspellbench.spell.AssignedSpell;
+import com.randomspellbench.spell.ImbueTarget;
+import com.randomspellbench.spell.SpellImbueManager;
 import com.randomspellbench.spell.SpellPoolManager;
 import com.randomspellbench.spell.SpellbookCatalog;
+import com.randomspellbench.spell.SpellbookDismantler;
 import com.randomspellbench.testbench.TestManager;
 import io.redspace.ironsspellbooks.api.spells.AbstractSpell;
 import net.minecraft.ChatFormatting;
@@ -31,12 +34,27 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import java.util.Collection;
 
 /**
- * 命令：/rspvp
+ * 命令：/rsta
  *
- * 保留：config / randomize / undo / chat / scroll / learn / unlock / lock / reload
+ * 保留：config / randomize / undo / chat / extract / imbue / unimbue / scroll / learn / unlock / lock / reload
  * 已移除：reset / tp / point / setpoint / arena / clear / all / cursor / give / dps / printLast
  */
 public final class RandomSpellCommands {
+
+    /** /rsta extract 的来源候选：默认（主手→副手→饰品栏）、只拆手上、只拆饰品栏。 */
+    private static final SuggestionProvider<CommandSourceStack> EXTRACT_FROM_SUGGESTIONS = (ctx, builder) -> {
+        builder.suggest("hand");
+        builder.suggest("curio");
+        return builder.buildFuture();
+    };
+
+    /** /rsta imbue|unimbue 的目标槽位候选。 */
+    private static final SuggestionProvider<CommandSourceStack> IMBUE_TARGET_SUGGESTIONS = (ctx, builder) -> {
+        for (ImbueTarget target : ImbueTarget.values()) {
+            builder.suggest(target.key());
+        }
+        return builder.buildFuture();
+    };
 
     private static final SuggestionProvider<CommandSourceStack> SPELL_SUGGESTIONS = (ctx, builder) -> {
         for (AbstractSpell spell : SpellPoolManager.getAvailableSpells()) {
@@ -62,6 +80,25 @@ public final class RandomSpellCommands {
                         .executes(RandomSpellCommands::undoSelf))
                 .then(Commands.literal("chat")
                         .executes(RandomSpellCommands::chatSelf))
+                .then(Commands.literal("extract")
+                        .executes(RandomSpellCommands::extractDefault)
+                        .then(Commands.argument("from", StringArgumentType.word())
+                                .suggests(EXTRACT_FROM_SUGGESTIONS)
+                                .executes(RandomSpellCommands::extractFrom)))
+                .then(Commands.literal("imbue")
+                        .then(Commands.argument("spell", StringArgumentType.word())
+                                .suggests(SPELL_SUGGESTIONS)
+                                .executes(RandomSpellCommands::imbueDefault)
+                                .then(Commands.argument("level", IntegerArgumentType.integer(1, 20))
+                                        .executes(RandomSpellCommands::imbueWithLevel)
+                                        .then(Commands.argument("target", StringArgumentType.word())
+                                                .suggests(IMBUE_TARGET_SUGGESTIONS)
+                                                .executes(RandomSpellCommands::imbueWithTarget)))))
+                .then(Commands.literal("unimbue")
+                        .executes(RandomSpellCommands::unimbueDefault)
+                        .then(Commands.argument("target", StringArgumentType.word())
+                                .suggests(IMBUE_TARGET_SUGGESTIONS)
+                                .executes(RandomSpellCommands::unimbueTarget)))
                 .then(Commands.literal("scroll")
                         .then(Commands.argument("spell", StringArgumentType.word())
                                 .suggests(SPELL_SUGGESTIONS)
@@ -144,6 +181,91 @@ public final class RandomSpellCommands {
     private static int chatSelf(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
         ServerPlayer player = ctx.getSource().getPlayerOrException();
         TestManager.toggleChatResult(player);
+        return 1;
+    }
+
+    /** /rsta extract：默认主手 → 副手 → 饰品栏。 */
+    private static int extractDefault(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        TestManager.extractSpells(player, SpellbookDismantler.Source.AUTO);
+        return 1;
+    }
+
+    /** /rsta extract hand|curio：指定只拆手上 / 只拆饰品栏。 */
+    private static int extractFrom(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        String from = StringArgumentType.getString(ctx, "from").toLowerCase(java.util.Locale.ROOT);
+        SpellbookDismantler.Source source;
+        if ("hand".equals(from) || "mainhand".equals(from)) {
+            source = SpellbookDismantler.Source.HAND;
+        } else if ("curio".equals(from) || "curios".equals(from) || "spellbook".equals(from)) {
+            source = SpellbookDismantler.Source.CURIO;
+        } else {
+            player.sendSystemMessage(Component.translatable("command.randomspellbench.error.extract_bad_source")
+                    .withStyle(net.minecraft.ChatFormatting.RED));
+            return 0;
+        }
+        TestManager.extractSpells(player, source);
+        return 1;
+    }
+
+    // ---------------- 注入法术 ----------------
+
+    /** /rsta imbue <法术>：默认注入主手，等级取玩家等级规则下限。 */
+    private static int imbueDefault(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return runImbue(ctx, 0, ImbueTarget.MAINHAND);
+    }
+
+    /** /rsta imbue <法术> <等级>：指定等级，仍注入主手。 */
+    private static int imbueWithLevel(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return runImbue(ctx, IntegerArgumentType.getInteger(ctx, "level"), ImbueTarget.MAINHAND);
+    }
+
+    /** /rsta imbue <法术> <等级> <目标>：指定等级与槽位。 */
+    private static int imbueWithTarget(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ImbueTarget target = ImbueTarget.byKey(StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            ctx.getSource().sendFailure(Component.translatable("command.randomspellbench.error.imbue_bad_target",
+                    StringArgumentType.getString(ctx, "target")));
+            return 0;
+        }
+        return runImbue(ctx, IntegerArgumentType.getInteger(ctx, "level"), target);
+    }
+
+    private static int runImbue(CommandContext<CommandSourceStack> ctx, int level, ImbueTarget target)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        AbstractSpell spell = SpellPoolManager.getSpell(StringArgumentType.getString(ctx, "spell"));
+        if (spell == null || AssignedSpell.isNoneSpell(spell)) {
+            player.sendSystemMessage(Component.translatable("command.randomspellbench.error.spell_not_found")
+                    .withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        // 服务端权威：权限、物品类型、槽位容量全部在 SpellImbueManager 内判定
+        SpellImbueManager.report(player, SpellImbueManager.imbue(player, spell, level, target));
+        return 1;
+    }
+
+    /** /rsta unimbue：清除主手物品上的注入法术。 */
+    private static int unimbueDefault(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return runUnimbue(ctx, ImbueTarget.MAINHAND);
+    }
+
+    /** /rsta unimbue <目标>：清除指定槽位物品上的注入法术。 */
+    private static int unimbueTarget(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ImbueTarget target = ImbueTarget.byKey(StringArgumentType.getString(ctx, "target"));
+        if (target == null) {
+            ctx.getSource().sendFailure(Component.translatable("command.randomspellbench.error.imbue_bad_target",
+                    StringArgumentType.getString(ctx, "target")));
+            return 0;
+        }
+        return runUnimbue(ctx, target);
+    }
+
+    private static int runUnimbue(CommandContext<CommandSourceStack> ctx, ImbueTarget target)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        SpellImbueManager.report(player, SpellImbueManager.clear(player, target));
         return 1;
     }
 

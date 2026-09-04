@@ -64,6 +64,27 @@ public final class EquipmentManager {
         return ItemStack.EMPTY;
     }
 
+    /**
+     * 清空 Curios 的 spellbook 槽位（把书从饰品栏取下来）。
+     * 调用方需要自行保管原物品栈 —— 本方法不负责把它放进背包。
+     *
+     * @return 找到 curios 容器并执行了写入则为 true
+     */
+    public static boolean clearSpellbookCurio(ServerPlayer player) {
+        try {
+            Optional<ICuriosItemHandler> inv = CuriosApi.getCuriosInventory(player).resolve();
+            if (inv.isEmpty()) {
+                return false;
+            }
+            inv.get().setEquippedCurio(SPELLBOOK_SLOT, 0, ItemStack.EMPTY);
+            return true;
+        } catch (Throwable t) {
+            RandomSpellPVP.LOGGER.warn("Failed to clear curios slot '{}' for {}: {}",
+                    SPELLBOOK_SLOT, player.getName().getString(), t.toString());
+            return false;
+        }
+    }
+
     /** 写入 Curios 槽位。成功装备返回 true。 */
     private static boolean setCurio(ServerPlayer player, String slot, int index, ItemStack stack) {
         try {

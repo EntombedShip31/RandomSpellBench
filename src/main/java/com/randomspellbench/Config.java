@@ -64,6 +64,11 @@ public final class Config {
         public final ForgeConfigSpec.BooleanValue avoidRepeatLast;     // 尽量不抽到与上次相同的一批
         public final ForgeConfigSpec.BooleanValue showResultInChat;    // 新玩家的聊天栏播报默认值
 
+        // -- 法术注入（imbue，等效 ISS 奥术铁砧）--
+        public final ForgeConfigSpec.BooleanValue imbueAllowAnyItem;    // 放开到任意物品（默认只认武器/盔甲/饰品）
+        public final ForgeConfigSpec.IntValue imbueMaxSpells;           // 单个物品最多注入几个法术
+        public final ForgeConfigSpec.BooleanValue imbueAppend;          // 已有注入时追加而非覆盖
+
         // -- 法术池 --
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> bannedSpells;   // 禁用法术 id
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> schoolWhitelist; // 学派白名单（空 = 不过滤），如 "eldritch"
@@ -94,6 +99,13 @@ public final class Config {
             appendToSpellbook = b.define("appendToSpellbook", false);
             avoidRepeatLast = b.define("avoidRepeatLast", false);
             showResultInChat = b.define("showResultInChat", true);
+            b.pop();
+
+            b.comment("法术注入（imbue）：把法术写进手持/穿戴的物品，等效 ISS 奥术铁砧")
+                    .push("imbue");
+            imbueAllowAnyItem = b.define("allowAnyItem", false);
+            imbueMaxSpells = b.defineInRange("maxSpellsPerItem", 3, 1, 16);
+            imbueAppend = b.define("appendToExisting", true);
             b.pop();
 
             b.comment("法术池过滤").push("spells");
