@@ -1,6 +1,7 @@
 package com.randomspellbench.client.gui;
 
 import com.randomspellbench.Config;
+import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.capability.AssignMode;
 import com.randomspellbench.capability.LevelMode;
 import com.randomspellbench.capability.PlayerSpellConfig;
@@ -37,6 +38,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
+import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
@@ -153,8 +155,9 @@ public class SpellConfigScreen extends Screen {
     private Button repeatButton;
 
     /**
-     * 注入 / 拆卷轴的目标槽位。纯客户端本地状态：服务端不保存该选择，
-     * 重开界面回到默认的主手（与「记住上次选中法术」不同，槽位选择没有记忆价值）。
+     * 注入 / 拆卷轴的目标槽位。纯客户端本地状态：服务端不保存该选择；
+     * 关闭界面时会记到静态 {@link #rememberedImbueTarget}，重开 / 预览返回后恢复
+     * （首次使用默认主手）。
      */
     private ImbueTarget imbueTarget = ImbueTarget.MAINHAND;
     /**
@@ -375,6 +378,10 @@ public class SpellConfigScreen extends Screen {
         addRenderableWidget(clearAllButton);
         // 操作按钮已在 init() 中 addChild 到 rightScrollPanel（随 scroll 一起渲染）
 
+        // 槽位选择跨界面记忆：重开 / 思索返回都恢复上次选的槽位（无记录 = 默认主手）
+        if (rememberedImbueTarget != null) {
+            imbueTarget = rememberedImbueTarget;
+        }
         // refreshDetail() 末尾会调用 reflowRightPanel()：按当前可见性流式重排 Y 并重算 scroll 高度
         refreshModeButtons();
         refreshDetail();
@@ -1038,9 +1045,16 @@ public class SpellConfigScreen extends Screen {
         // 顶部标题栏
         g.fill(0, 0, width, TITLE_BAR_H, 0xFF1A1108);
         g.fill(0, TITLE_BAR_H - 1, width, TITLE_BAR_H, COLOR_ACCENT);
-        g.drawCenteredString(font,
-                Component.translatable("screen.randomspellbench.title").getString(),
-                width / 2, 6, 0xFFFFD699);
+        // 顶部标题：居中 = 「随机法术测试台」+ 淡色的版本号（vX.Y.Z）
+        String title = Component.translatable("screen.randomspellbench.title").getString();
+        String versionLabel = versionText().isEmpty() ? "" : "  " + versionText();
+        int titleW = font.width(title);
+        int versionW = versionLabel.isEmpty() ? 0 : font.width(versionLabel);
+        int titleX = (width - titleW - versionW) / 2;
+        g.drawString(font, title, titleX, 6, 0xFFFFD699, false);
+        if (!versionLabel.isEmpty()) {
+            g.drawString(font, versionLabel, titleX + titleW, 6, 0x66FFD699, false);
+        }
 
         fillPanel(g, leftPanelX0, leftPanelY0, leftPanelX1, leftPanelY1);
         fillPanel(g, rightPanelX0, rightPanelY0, rightPanelX1, rightPanelY1);
@@ -1374,6 +1388,9 @@ public class SpellConfigScreen extends Screen {
     private static int rememberedScroll;
     @Nullable
     private static Set<ResourceLocation> rememberedCollapsed;
+    /** 上次关闭界面时选择的注入 / 拆卷轴槽位（null = 从未选过，保持默认主手）。 */
+    @Nullable
+    private static ImbueTarget rememberedImbueTarget;
 
     /** removed() 时保存当前列表位置，供下次打开恢复。 */
     private void rememberCurrentState() {
@@ -1384,6 +1401,7 @@ public class SpellConfigScreen extends Screen {
         rememberedSearch = getSearchText();
         rememberedScroll = getListScroll();
         rememberedCollapsed = getCollapsedGroups();
+        rememberedImbueTarget = imbueTarget;
     }
 
     /** 普通打开（非思索返回）时恢复到上次记住的位置；无记录则保持初始。 */
@@ -1400,5 +1418,27 @@ public class SpellConfigScreen extends Screen {
     private static Minecraft mc() {
         return Minecraft.getInstance();
     }
+
+    /**
+     * 当前模组版本号（如 "1.0.4"），从 ModList 读一次后缓存。
+     * 取不到（理论不会发生）时返回空串，标题栏只显示名字不显示版本。
+     */
+    private static String versionText() {
+        if (cachedVersionText == null) {
+            cachedVersionText = "";
+            try {
+                cachedVersionText = ModList.get()
+                        .getModContainerById(RandomSpellPVP.MODID)
+                        .map(c -> c.getModInfo().getVersion().toString())
+                        .orElse("");
+            } catch (Throwable ignored) {
+                cachedVersionText = "";
+            }
+        }
+        return cachedVersionText;
+    }
+
+    @Nullable
+    private static String cachedVersionText;
 }
    

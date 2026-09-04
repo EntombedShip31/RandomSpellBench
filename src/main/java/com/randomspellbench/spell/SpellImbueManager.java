@@ -233,8 +233,12 @@ public final class SpellImbueManager {
         if (container == null || container.getMaxSpellCount() <= 0) {
             return Result.fail("command.randomspellbench.error.imbue_not_imbued", targetName(target));
         }
+        // 书（ISpellbook）才尊重「锁定」语义；武器/盔甲上由注入产生的法术在 ISS 容器里
+        // 也是 locked=true（createImbuedContainer 就是这么写的），必须照样能拆——
+        // 否则就会出现「选任意部位都提示全部锁定」的假死现象。
+        boolean bookLike = SpellbookDismantler.isSpellbook(stack);
 
-        // ---- 1) 只读扫描：哪些槽位可拆（空槽 / none / 锁定的一律跳过，此时不动物品）----
+        // ---- 1) 只读扫描：哪些槽位可拆（空槽 / none 跳过；仅书跳过锁定项，此时不动物品）----
         int populated = 0;
         int locked = 0;
         List<Integer> indexes = new ArrayList<>();
@@ -250,7 +254,7 @@ public final class SpellImbueManager {
             if (AssignedSpell.isNoneSpell(sp)) {
                 continue;
             }
-            if (!data.canRemove()) {
+            if (bookLike && !data.canRemove()) {
                 locked++;
                 continue;
             }
@@ -259,7 +263,7 @@ public final class SpellImbueManager {
             levels.add(Math.max(1, data.getLevel()));
         }
         if (spells.isEmpty()) {
-            return Result.fail(locked > 0
+            return Result.fail(bookLike && locked > 0
                             ? "command.randomspellbench.error.spellbook_all_locked"
                             : "command.randomspellbench.error.imbue_not_imbued",
                     targetName(target));
@@ -279,7 +283,7 @@ public final class SpellImbueManager {
         }
 
         // ---- 3) 回写物品（走到这里才真正改动）----
-        if (SpellbookDismantler.isSpellbook(stack)) {
+        if (bookLike) {
             // 书：拆掉被选中的法术，保留空容器（槽位留给后续注入 / 分配）
             ItemStack book = stack.copy();
             ISpellContainerMutable mutable = ISpellContainer.get(book).mutableCopy();

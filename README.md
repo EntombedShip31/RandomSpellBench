@@ -10,7 +10,7 @@
 | 项目 | 值 |
 | --- | --- |
 | Mod ID | `randomspellbench` |
-| 版本 | `1.0.3` |
+| 版本 | `1.0.4` |
 | 加载器 | Forge（Forge `47.4.0+`，加载器版本 `[47,)`） |
 | Minecraft | `1.20.1`（版本范围 `[1.20.1, 1.21)`） |
 | 开源协议 | MIT |
@@ -37,7 +37,7 @@
 ## 安装
 
 1. 安装对应版本的 Minecraft Forge（`47.4.0+`）。
-2. 把下载好的 `randomspellbench-1.0.3.jar` 与前置模组一起放入 `.minecraft/mods/` 目录。
+2. 把下载好的 `randomspellbench-1.0.4.jar` 与前置模组一起放入 `.minecraft/mods/` 目录。
 3. 启动游戏，按 **F6 键**（未安装 Iron's Spells 时为 K）或在聊天栏输入 `/rsta config` 打开测试台界面。
 
 ---
@@ -90,14 +90,14 @@
 需要 Java 17 与可访问的 Gradle 分发（本项目 `gradle-wrapper.properties` 使用腾讯云镜像以便国内网络）。
 
 ```bash
-# 用包装器构建（产物：build/libs/randomspellbench-1.0.3.jar）
+# 用包装器构建（产物：build/libs/randomspellbench-1.0.4.jar）
 ./gradlew build
 
 # 构建并直接复制到本地 Minecraft 的 mods 目录（默认指向 PCL2 的 1.20.1-Forge 实例）
 ./gradlew build -Ppcl2_mods_dir=D:/path/to/your/mods
 ```
 
-构建后也可手动将 `build/libs/randomspellbench-1.0.3.jar` 复制到任意实例的 `mods` 目录。
+构建后也可手动将 `build/libs/randomspellbench-1.0.4.jar` 复制到任意实例的 `mods` 目录。
 
 ---
 
