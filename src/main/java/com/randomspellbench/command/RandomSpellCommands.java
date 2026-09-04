@@ -36,8 +36,8 @@ import java.util.Collection;
 /**
  * 命令：/rsta
  *
- * 保留：config / randomize / undo / chat / extract / imbue / unimbue / scroll / learn / unlock / lock / reload
- * 已移除：reset / tp / point / setpoint / arena / clear / all / cursor / give / dps / printLast
+ * 保留：config / randomize / undo / extract / imbue / unimbue / scroll / learn / unlock / lock / reload
+ * 已移除：chat（v1.0.3 起分配结果播报固定开启）、reset / tp / point / setpoint / arena / clear / all / cursor / give / dps / printLast
  */
 public final class RandomSpellCommands {
 
@@ -78,8 +78,6 @@ public final class RandomSpellCommands {
                         .executes(RandomSpellCommands::randomizeSelf))
                 .then(Commands.literal("undo")
                         .executes(RandomSpellCommands::undoSelf))
-                .then(Commands.literal("chat")
-                        .executes(RandomSpellCommands::chatSelf))
                 .then(Commands.literal("extract")
                         .executes(RandomSpellCommands::extractDefault)
                         .then(Commands.argument("from", StringArgumentType.word())
@@ -175,12 +173,6 @@ public final class RandomSpellCommands {
             return 0;
         }
         TestManager.undo(player);
-        return 1;
-    }
-
-    private static int chatSelf(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        ServerPlayer player = ctx.getSource().getPlayerOrException();
-        TestManager.toggleChatResult(player);
         return 1;
     }
 

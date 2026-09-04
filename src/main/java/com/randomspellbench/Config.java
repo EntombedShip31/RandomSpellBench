@@ -58,11 +58,9 @@ public final class Config {
         public final ForgeConfigSpec.BooleanValue clearInventory;      // 分配时是否清空背包（默认关）
         public final ForgeConfigSpec.ConfigValue<String> defaultSpellbook;
         public final ForgeConfigSpec.BooleanValue randomizeSpellbook;  // 从 ISS 法术书中随机挑一本
-        public final ForgeConfigSpec.BooleanValue resetOnRandomize;    // 分配后回满血蓝/清冷却/buff
         public final ForgeConfigSpec.BooleanValue fillSpellbookSlots;  // 槽位固定为 maxSpells
         public final ForgeConfigSpec.BooleanValue appendToSpellbook;   // 追加到现有法术书而非替换
         public final ForgeConfigSpec.BooleanValue avoidRepeatLast;     // 尽量不抽到与上次相同的一批
-        public final ForgeConfigSpec.BooleanValue showResultInChat;    // 新玩家的聊天栏播报默认值
 
         // -- 法术注入（imbue，等效 ISS 奥术铁砧）--
         public final ForgeConfigSpec.BooleanValue imbueAllowAnyItem;    // 放开到任意物品（默认只认武器/盔甲/饰品）
@@ -94,11 +92,9 @@ public final class Config {
             clearInventory = b.define("clearInventory", false);
             defaultSpellbook = b.define("defaultSpellbook", "irons_spellbooks:spell_book");
             randomizeSpellbook = b.define("randomizeSpellbook", true);
-            resetOnRandomize = b.define("resetOnRandomize", true);
             fillSpellbookSlots = b.define("fillSpellbookSlots", false);
             appendToSpellbook = b.define("appendToSpellbook", false);
             avoidRepeatLast = b.define("avoidRepeatLast", false);
-            showResultInChat = b.define("showResultInChat", true);
             b.pop();
 
             b.comment("法术注入（imbue）：把法术写进手持/穿戴的物品，等效 ISS 奥术铁砧")

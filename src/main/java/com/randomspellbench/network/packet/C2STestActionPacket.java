@@ -9,14 +9,14 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.function.Supplier;
 
 /**
- * C2S：测试台操作（撤销 / 切换聊天播报 / 长按学习法术）。
+ * C2S：测试台操作（撤销 / 长按学习法术 / 复现上次）。
  *
- * 已移除：恢复状态、传送测试点、搭建场地、清空法术书、只给选中法术等分支。
+ * 已移除：切换聊天播报（v1.0.3 起固定开启）、恢复状态、传送测试点、
+ *         搭建场地、清空法术书、只给选中法术等分支。
  */
 public class C2STestActionPacket {
     public enum Action {
         UNDO,
-        TOGGLE_CHAT,
         LEARN_SPELL,
         REPEAT_LAST
     }
@@ -53,7 +53,6 @@ public class C2STestActionPacket {
             }
             switch (msg.action) {
                 case UNDO -> TestManager.undo(player);
-                case TOGGLE_CHAT -> TestManager.toggleChatResult(player);
                 case LEARN_SPELL -> {
                     if (msg.spellId.isEmpty()) {
                         return;

@@ -14,15 +14,18 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.function.Supplier;
 
 /**
- * C2S：注入 / 清除注入。
+ * C2S：注入 / 拆卷轴 / 清除注入。
  *
  * 注入（IMBUE）把选中法术按指定等级写进目标槽位的物品，效果等同 ISS 奥术铁砧：
- * 手持（武器）/ 穿戴（盔甲、饰品）即可在法术轮盘上看到并使用该法术。
+ * 手持（武器）/ 穿戴（盔甲、饰品）即可在法术轮盘上看到并使用该法术；
+ * 目标是「书」时改为把法术写进 Curios 饰品栏的法术书。
+ * 拆下（EXTRACT）把目标物品上的法术抄成卷轴放进背包并从物品上移除（GUI「拆下卷轴」）。
  * 清除（CLEAR）等价于原版忏悔石，移除物品上的 {@code spell_container}。
  */
 public class C2SImbueSpellPacket {
     public enum Action {
         IMBUE,
+        EXTRACT,
         CLEAR
     }
 
@@ -77,6 +80,8 @@ public class C2SImbueSpellPacket {
                     return;
                 }
                 result = SpellImbueManager.imbue(player, spell, msg.level, target);
+            } else if (msg.action == Action.EXTRACT) {
+                result = SpellImbueManager.extractAsScrolls(player, target);
             } else {
                 result = SpellImbueManager.clear(player, target);
             }

@@ -14,7 +14,6 @@ import com.randomspellbench.client.gui.widget.SliderWidget;
 import com.randomspellbench.client.gui.widget.SpellListWidget;
 import com.randomspellbench.network.NetworkHandler;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
-import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
@@ -41,6 +40,9 @@ import net.minecraft.network.chat.TextColor;
 import org.lwjgl.glfw.GLFW;
 
 import javax.annotation.Nullable;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,8 +56,11 @@ import java.util.List;
  * - 法术池管理（搜索 / 施法类型过滤 / 全选清除 / 每学派至少 1 个）
  * - 等级规则（范围随机 / 固定等级）
  * - 选中法术的独立等级范围（fixed 模式下滑块置灰并给出提示）
- * - 生成卷轴 / 长按学习 / 预览 / 聊天播报 / 复现上次 / 一键拆法术书
- * - 注入法术：把选中法术写进主手 / 副手 / 盔甲四件（等效 ISS 奥术铁砧），并可一键清除
+ * - 生成卷轴 / 长按学习 / 预览 / 复现上次
+ * - 注入 / 拆卷轴：7 个槽位按钮一键直达（主 / 副 / 头 / 胸 / 腿 / 脚 / 书），
+ *   把选中法术写进该槽位物品（书 = 写入饰品栏法术书，书满了会拒绝），
+ *   或把该槽位物品上的法术拆成卷轴放进背包
+ * - 分配结果在 actionbar 固定播报（v1.0.3 起移除聊天播报开关）
  * - 长按学习进度条附带百分比提示
  */
 public class SpellConfigScreen extends Screen {
@@ -145,18 +150,21 @@ public class SpellConfigScreen extends Screen {
     private Button scrollButton;
     private Button learnButton;
     private Button previewButton;
-    private Button chatResultButton;
     private Button repeatButton;
-    private Button extractButton;
 
     /**
-     * 注入目标槽位。纯客户端本地状态：服务端不保存该选择，
+     * 注入 / 拆卷轴的目标槽位。纯客户端本地状态：服务端不保存该选择，
      * 重开界面回到默认的主手（与「记住上次选中法术」不同，槽位选择没有记忆价值）。
      */
     private ImbueTarget imbueTarget = ImbueTarget.MAINHAND;
-    private Button imbueTargetButton;
+    /**
+     * 7 个槽位按钮并排（主 / 副 / 头 / 胸 / 腿 / 脚 / 书），一键直达目标槽位。
+     * 早期版本是「单按钮循环切换」，选到最后一个部位要连点好几下；改成并排后一次点击即可。
+     */
+    private final Map<ImbueTarget, Button> imbueTargetButtons = new EnumMap<>(ImbueTarget.class);
     private Button imbueButton;
-    private Button unimbueButton;
+    /** 「拆下卷轴」：把当前选中槽位物品上的法术拆成卷轴（与「注入法术」并排，取代原「清除」）。 */
+    private Button extractTargetButton;
 
     private Button randomizeButton;
     private Button closeButton;
@@ -313,16 +321,31 @@ public class SpellConfigScreen extends Screen {
                 v -> onSpellRangeChanged(),
                 v -> commitSpellRange()));
 
-        // 注入三件套：目标槽位循环按钮 + 注入 + 清除注入。
+        // 注入区：两行搞定（早期版本是「循环按钮 + 注入 + 清除」三行，且选部位要连点）。
         // 刻意排在「生成卷轴」之前——注入与选中法术强相关，和卷轴是同一类操作。
-        imbueTargetButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> cycleImbueTarget())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
+        //   行 1：[主][副][头][胸][腿][脚][书] —— 并排小按钮，一次点击直达目标槽位
+        //   行 2：[注入法术] [拆下卷轴] —— 横向平行；拆下卷轴取代原「清除」，按文本宽度自适应
+        ImbueTarget[] slots = ImbueTarget.values();
+        int slotGap = 3;
+        int slotW = Math.max(16, (rw - slotGap * (slots.length - 1)) / slots.length);
+        // 整除余下的几像素给最后一个按钮，让这一行右边缘与下方「注入 / 拆下卷轴」行对齐
+        int lastSlotW = Math.max(16, rw - (slots.length - 1) * (slotW + slotGap));
+        for (int i = 0; i < slots.length; i++) {
+            ImbueTarget slot = slots[i];
+            int w = (i == slots.length - 1) ? lastSlotW : slotW;
+            imbueTargetButtons.put(slot, rightScrollPanel.addChild(
+                    Button.builder(Component.empty(), b -> selectImbueTarget(slot))
+                            .bounds(rx + i * (slotW + slotGap), scrollY0, w, ROW_H).build()));
+        }
 
+        Component extractMsg = Component.translatable("screen.randomspellbench.btn_extract_target");
+        int extractW = Math.max(72, font.width(extractMsg) + 14);
+        int imbueW = Math.max(64, rw - extractW - 4);
         imbueButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_imbue"), b -> imbueSelected())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
+                .bounds(rx, scrollY0, imbueW, ROW_H).build());
 
-        unimbueButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_unimbue"), b -> clearImbue())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
+        extractTargetButton = rightScrollPanel.addChild(Button.builder(extractMsg, b -> extractSelected())
+                .bounds(rx + imbueW + 4, scrollY0, extractW, ROW_H).build());
 
         scrollButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_scroll"), b -> spawnSelectedScroll())
                 .bounds(rx, scrollY0, rw, ROW_H).build());
@@ -333,14 +356,7 @@ public class SpellConfigScreen extends Screen {
         previewButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_preview"), b -> previewSelected())
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
-        chatResultButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> toggleChatResult())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
-
         repeatButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_repeat"), b -> repeatLast())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
-
-        // 一键拆法术书：与选中法术无关，任何时刻都可点（服务端再判权限与是否有书）
-        extractButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_extract"), b -> extractSpellbook())
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
         // —— 底部固定：随机分配 + 关闭（始终可见，不参与滚动）——
@@ -707,17 +723,9 @@ public class SpellConfigScreen extends Screen {
         closeIfConfigured();
     }
 
-    /**
-     * 一键拆法术书：全部交给服务端处理（查找顺序、卷轴生成、背包溢出掉落、饰品栏摘除）。
-     * 这里故意不关界面 —— 结果提示会走 actionbar，关掉反而看不到。
-     */
-    private void extractSpellbook() {
-        NetworkHandler.sendToServer(new C2SExtractSpellsPacket(C2SExtractSpellsPacket.From.AUTO));
-    }
-
-    /** 循环切换注入目标（主手 → 副手 → 头盔 → 胸甲 → 护腿 → 靴子）。 */
-    private void cycleImbueTarget() {
-        imbueTarget = imbueTarget.next();
+    /** 直接选中注入 / 拆卷轴的目标槽位（并排按钮，一次点击直达）。 */
+    private void selectImbueTarget(ImbueTarget target) {
+        imbueTarget = target;
         refreshDetail();
     }
 
@@ -737,10 +745,14 @@ public class SpellConfigScreen extends Screen {
                 C2SImbueSpellPacket.Action.IMBUE, selectedSpell.getSpellId(), level, imbueTarget.key()));
     }
 
-    /** 清除目标槽位物品上的注入法术（等效原版忏悔石）。 */
-    private void clearImbue() {
+    /**
+     * 「拆下卷轴」：把当前选中槽位物品上的法术拆成卷轴放进背包。
+     * 不依赖选中法术，选中目标槽位即可触发；不关界面以便连续换目标操作
+     * （结果提示由服务端发回，走 actionbar / 聊天栏）。
+     */
+    private void extractSelected() {
         NetworkHandler.sendToServer(new C2SImbueSpellPacket(
-                C2SImbueSpellPacket.Action.CLEAR, "", 0, imbueTarget.key()));
+                C2SImbueSpellPacket.Action.EXTRACT, "", 0, imbueTarget.key()));
     }
 
     /** 长按思索完成：请求 iss_ponder 打开选中法术的演示界面；失败给兜底提示并返回 false。 */
@@ -775,13 +787,6 @@ public class SpellConfigScreen extends Screen {
         } catch (Throwable t) {
             return false;
         }
-    }
-
-    private void toggleChatResult() {
-        config.setShowResultInChat(!config.isShowResultInChat());
-        NetworkHandler.sendToServer(new C2STestActionPacket(
-                C2STestActionPacket.Action.TOGGLE_CHAT, ""));
-        refreshDetail();
     }
 
     private void closeIfConfigured() {
@@ -836,9 +841,12 @@ public class SpellConfigScreen extends Screen {
         previewButton.active = hasSelection;
         learnButton.active = hasSelection && isEldritch(selectedSpell);
         repeatButton.active = !ClientConfigData.getLastResult().isEmpty();
-        // 注入需要选中法术；清除注入不需要（只跟目标槽位有关），因此始终可用
+        // 注入需要选中法术；拆下卷轴不需要（只跟目标槽位有关），因此始终可用
         imbueButton.active = hasSelection;
-        unimbueButton.active = true;
+        extractTargetButton.active = true;
+        for (Button slot : imbueTargetButtons.values()) {
+            slot.active = true;
+        }
 
         // 条件按钮：不满足条件时隐藏（隐藏后由 reflowRightPanel 紧凑补位，不留空白）
         // - 长按学习：仅选中「远古巫术」学派法术时才有意义
@@ -846,25 +854,23 @@ public class SpellConfigScreen extends Screen {
         learnButton.visible = hasSelection && isEldritch(selectedSpell);
         previewButton.visible = PonderCompat.isPonderLoaded();
         scrollButton.visible = true;
-        chatResultButton.visible = true;
         repeatButton.visible = true;
-        extractButton.visible = true;
-        extractButton.active = true;
-        imbueTargetButton.visible = true;
-        imbueTargetButton.active = true;
+        for (Button slot : imbueTargetButtons.values()) {
+            slot.visible = true;
+        }
         imbueButton.visible = true;
-        unimbueButton.visible = true;
+        extractTargetButton.visible = true;
 
         minOnePerSchoolButton.setMessage(Component.literal(
                 config.isMinOnePerSchool() ? "[x] " : "[ ] ")
                 .append(Component.translatable("screen.randomspellbench.min_one_per_school")));
 
-        chatResultButton.setMessage(Component.translatable("screen.randomspellbench.chat_result",
-                Component.translatable(config.isShowResultInChat()
-                        ? "screen.randomspellbench.on" : "screen.randomspellbench.off")));
-
-        imbueTargetButton.setMessage(Component.translatable("screen.randomspellbench.imbue_target",
-                Component.translatable(imbueTarget.translationKey())));
+        // 部位按钮：选中的白字，其余灰色（选中态的橙色描边在渲染层补，见 drawImbueTargetHighlight）
+        for (Map.Entry<ImbueTarget, Button> entry : imbueTargetButtons.entrySet()) {
+            boolean current = entry.getKey() == imbueTarget;
+            entry.getValue().setMessage(Component.translatable(entry.getKey().shortTranslationKey())
+                    .withStyle(current ? ChatFormatting.WHITE : ChatFormatting.GRAY));
+        }
 
         if (hasSelection) {
             SpellFilter filter = config.getFilter(selectedSpell);
@@ -942,15 +948,13 @@ public class SpellConfigScreen extends Screen {
         y += SECTION_GAP;
         sectionActionY = y;
         y += SECTION_TITLE_H;
-        y = place(imbueTargetButton, y, ROW_H);
-        y = place(imbueButton, y, ROW_H);
-        y = place(unimbueButton, y, ROW_H);
+        // 注入区：部位 7 连排一行 + 注入/拆下卷轴并排一行（原「循环按钮 / 注入 / 清除」3 行 → 2 行）
+        y = placeRow(y, imbueTargetButtons.values(), ROW_H);
+        y = placeRow(y, List.of(imbueButton, extractTargetButton), ROW_H);
         y = place(scrollButton, y, ROW_H);
         y = place(learnButton, y, ROW_H);
         y = place(previewButton, y, ROW_H);
-        y = place(chatResultButton, y, ROW_H);
         y = place(repeatButton, y, ROW_H);
-        y = place(extractButton, y, ROW_H);
 
         // 重算内容高度与滚动范围（新 Y 立即生效）
         rightScrollPanel.layout();
@@ -965,6 +969,23 @@ public class SpellConfigScreen extends Screen {
         }
         widget.setY(y);
         return y + height + ROW_GAP;
+    }
+
+    /**
+     * 把一组控件摆在同一行，整组只占一个行高（任一可见即占位）。
+     * 用于注入区：7 个槽位按钮并排、「注入法术 + 拆下卷轴」并排，
+     * 避免同类操作各占一行把右面板撑长。
+     */
+    private static int placeRow(int y, Collection<? extends AbstractWidget> widgets, int height) {
+        boolean anyVisible = false;
+        for (AbstractWidget widget : widgets) {
+            if (!widget.visible) {
+                continue;
+            }
+            widget.setY(y);
+            anyVisible = true;
+        }
+        return anyVisible ? y + height + ROW_GAP : y;
     }
 
     // ======================= 渲染 =======================
@@ -1004,6 +1025,7 @@ public class SpellConfigScreen extends Screen {
         try {
             drawLongPressProgress(g);
             drawPreviewProgress(g);
+            drawImbueTargetHighlight(g);
         } finally {
             g.pose().popPose();
             g.disableScissor();
@@ -1111,6 +1133,41 @@ public class SpellConfigScreen extends Screen {
         g.drawString(font, pct + "%", x + previewButton.getWidth() + 4, y + 2, 0xFFFFB566, false);
     }
 
+    /**
+     * 部位按钮用的是「主 / 副 / 头 / 胸 / 腿 / 脚」这类短标签（6 个挤一行放不下全名），
+     * 悬停时补一个完整槽位名的 tooltip。
+     *
+     * @return 命中部位按钮则为 true（此时不应再叠加法术 tooltip）
+     */
+    private boolean drawImbueSlotTooltip(GuiGraphics g, int screenX, int screenY) {
+        for (Map.Entry<ImbueTarget, Button> entry : imbueTargetButtons.entrySet()) {
+            Button slot = entry.getValue();
+            if (slot.visible && slot.isHovered()) {
+                g.renderComponentTooltip(font,
+                        List.of(Component.translatable(entry.getKey().translationKey())), screenX, screenY);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 当前注入部位的选中高亮。
+     *
+     * Minecraft 的 {@link Button} 只有 hover 态、没有「选中」态，
+     * 6 个部位按钮并排后光靠文字颜色很难一眼看出哪一项生效，
+     * 这里在按钮之上补一层橙色描边（画在 super.render() 之后，不会被按钮背景盖掉）。
+     */
+    private void drawImbueTargetHighlight(GuiGraphics g) {
+        Button selected = imbueTargetButtons.get(imbueTarget);
+        if (selected == null || !selected.visible) {
+            return;
+        }
+        int x = selected.getX();
+        int y = selected.getY();
+        drawBorder(g, x, y, x + selected.getWidth(), y + selected.getHeight(), COLOR_ACCENT);
+    }
+
     private void drawSectionLabel(GuiGraphics g, String key, int x, int y) {
         g.fill(x, y + 1, x + 2, y + 8, COLOR_ACCENT_DARK);
         g.drawString(font, Component.translatable(key).getString(), x + 6, y, COLOR_LABEL, false);
@@ -1156,6 +1213,9 @@ public class SpellConfigScreen extends Screen {
     }
 
     private void drawHoveredTooltip(GuiGraphics g, int screenX, int screenY) {
+        if (drawImbueSlotTooltip(g, screenX, screenY)) {
+            return;
+        }
         AbstractSpell hovered = spellList.getHovered(screenX, screenY);
         if (hovered == null) {
             return;

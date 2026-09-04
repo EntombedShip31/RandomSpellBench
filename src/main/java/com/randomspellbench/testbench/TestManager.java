@@ -1,10 +1,8 @@
 package com.randomspellbench.testbench;
 
-import com.randomspellbench.Config;
 import com.randomspellbench.capability.AssignMode;
 import com.randomspellbench.capability.PlayerConfigStore;
 import com.randomspellbench.capability.PlayerSpellConfig;
-import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.events.PermissionHelper;
 import com.randomspellbench.equipment.EquipmentManager;
 import com.randomspellbench.network.NetworkHandler;
@@ -25,8 +23,9 @@ import java.util.List;
 /**
  * 测试台流程编排（服务端权威）。
  *
- * 简化后保留：随机分配 / 撤销 / 切换聊天播报 / 生成法术卷轴 / 长按学习法术。
- * 已移除：恢复状态、传送测试点、搭建场地、清空法术书、只给选中法术、全部/顺序分配模式、DPS 统计。
+ * 简化后保留：随机分配 / 撤销 / 生成法术卷轴 / 长按学习法术 / 一键拆法术书。
+ * 已移除：分配后回血饱食/清状态清冷却（v1.0.3）、聊天播报开关（v1.0.3 起固定开启）、
+ *         恢复状态、传送测试点、搭建场地、清空法术书、只给选中法术、全部/顺序分配模式、DPS 统计。
  */
 public final class TestManager {
     /** actionbar 一行最多展示几个法术名（超出折叠）。 */
@@ -178,52 +177,9 @@ public final class TestManager {
     }
 
     private static void afterAssign(ServerPlayer player, PlayerSpellConfig config, List<AssignedSpell> spells) {
-        // resetOnRandomize：分配后回满血/饱食/清 buff/清 ISS 冷却（配置默认 true，之前完全未生效）
-        if (Config.SERVER.resetOnRandomize.get()) {
-            resetPlayerAfterAssign(player);
-        }
         NetworkHandler.sendToPlayer(new S2CAssignedSpellsPacket(true, spells), player);
-        if (config.isShowResultInChat()) {
-            sendResult(player, spells);
-        }
-    }
-
-    /** 分配后的回血/清冷却/解 buff 复位（服务端主线程调用）。 */
-    private static void resetPlayerAfterAssign(ServerPlayer player) {
-        try {
-            player.setHealth(player.getMaxHealth());
-            player.getFoodData().setFoodLevel(20);
-            player.getFoodData().setSaturation(5f);
-            player.removeAllEffects();
-            // ISS 冷却/复唱统一交给 MagicCompat（精确方法名优先 + 兼容兜底），
-            // 避免在本类内重复实现一套反射逻辑导致两处行为不一致。
-            io.redspace.ironsspellbooks.api.magic.MagicData magicData =
-                    io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(player);
-            com.randomspellbench.compat.MagicCompat.clearCooldowns(magicData);
-            com.randomspellbench.compat.MagicCompat.clearRecasts(magicData);
-        } catch (Throwable t) {
-            RandomSpellPVP.LOGGER.warn("resetOnRandomize failed for {}: {}",
-                    player.getName().getString(), t.toString());
-        }
-    }
-
-    // ---------------- 其它操作 ----------------
-
-    /** 切换「分配后在 actionbar 列出结果」。 */
-    public static boolean toggleChatResult(ServerPlayer player) {
-        // 与其它操作保持一致的权限边界：无权限玩家不得改动聊天播报设置
-        if (!PermissionHelper.canUse(player)) {
-            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
-            return PlayerConfigStore.get(player).isShowResultInChat();
-        }
-        PlayerSpellConfig config = PlayerConfigStore.get(player);
-        boolean next = !config.isShowResultInChat();
-        config.setShowResultInChat(next);
-        PlayerConfigStore.save(player, config);
-        feedback(player, Component.translatable(next
-                        ? "command.randomspellbench.chat.on" : "command.randomspellbench.chat.off")
-                .withStyle(next ? ChatFormatting.GREEN : ChatFormatting.GRAY), true);
-        return next;
+        // 分配结果播报固定开启（v1.0.3 已移除「聊天栏播报」开关及其玩家级配置）
+        sendResult(player, spells);
     }
 
     // ---------------- 结果展示（actionbar 一行小字，不入聊天栏） ----------------

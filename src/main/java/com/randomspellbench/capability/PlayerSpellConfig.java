@@ -28,7 +28,6 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
     private static final String KEY_LEVEL_MODE = "LevelMode";
     private static final String KEY_FIXED_LEVEL = "FixedLevel";
     private static final String KEY_CURSOR = "Cursor"; // 旧字段（顺序遍历），保留读以兼容旧存档
-    private static final String KEY_CHAT_RESULT = "ChatResult";
     private static final String KEY_MIN_ONE_PER_SCHOOL = "MinOnePerSchool";
     private static final String KEY_BYPASS_CREATIVE_ONLY = "BypassCreativeOnly";
 
@@ -45,8 +44,6 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
     private AssignMode mode = fallback(Config.SERVER.defaultAssignMode.get(), AssignMode.RANDOM);
     private LevelMode levelMode = fallback(Config.SERVER.defaultLevelMode.get(), LevelMode.RANGE);
     private int fixedLevel = Config.SERVER.defaultFixedLevel.get();
-    /** 是否在聊天栏播报分配结果（实际上现在用 actionbar）。 */
-    private boolean showResultInChat = Config.SERVER.showResultInChat.get();
     /** 是否解除创造模式限制（/rspvp unlock 切换），跨世界持久化。 */
     private boolean bypassCreativeOnly = false;
     /** 随机时每学派至少抽 1 个。 */
@@ -161,16 +158,6 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         this.minOnePerSchool = minOnePerSchool;
     }
 
-    // ---------- 聊天播报 ----------
-
-    public boolean isShowResultInChat() {
-        return showResultInChat;
-    }
-
-    public void setShowResultInChat(boolean showResultInChat) {
-        this.showResultInChat = showResultInChat;
-    }
-
     // ---------- 创造模式限制 ----------
 
     public boolean isBypassCreativeOnly() {
@@ -236,7 +223,6 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         tag.putString(KEY_MODE, mode.name());
         tag.putString(KEY_LEVEL_MODE, levelMode.name());
         tag.putInt(KEY_FIXED_LEVEL, fixedLevel);
-        tag.putBoolean(KEY_CHAT_RESULT, showResultInChat);
         tag.putBoolean(KEY_MIN_ONE_PER_SCHOOL, minOnePerSchool);
         tag.putBoolean(KEY_BYPASS_CREATIVE_ONLY, bypassCreativeOnly);
 
@@ -268,7 +254,6 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         levelMode = parseEnum(tag.getString(KEY_LEVEL_MODE), LevelMode.RANGE);
         fixedLevel = tag.contains(KEY_FIXED_LEVEL) ? Math.max(1, tag.getInt(KEY_FIXED_LEVEL))
                 : Config.SERVER.defaultFixedLevel.get();
-        showResultInChat = !tag.contains(KEY_CHAT_RESULT) || tag.getBoolean(KEY_CHAT_RESULT);
         minOnePerSchool = tag.getBoolean(KEY_MIN_ONE_PER_SCHOOL);
         bypassCreativeOnly = tag.getBoolean(KEY_BYPASS_CREATIVE_ONLY);
 
