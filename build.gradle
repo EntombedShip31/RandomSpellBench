@@ -67,10 +67,9 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // ---------- ISS（Iron's Spells 'n Spellbooks）----------
-    // 稳定 API 包（仅含 io.redspace.ironsspellbooks.api.*），编译期使用
-    compileOnly fg.deobf("io.redspace:irons_spellbooks:${irons_spells_version}:api")
-    // 完整模组（运行时）
-    runtimeOnly fg.deobf("io.redspace:irons_spellbooks:${irons_spells_version}")
+    // 编译期直接用完整模组构件：code.redspace.io 的 :api 分类器构件在离线/受限网络下拉不到，
+    // 而完整 jar 本地已有缓存（deobf 结果同样缓存），编译期多出的非 API 类不影响编译。
+    implementation fg.deobf("io.redspace:irons_spellbooks:${irons_spells_version}")
 
     // ---------- Curios API（法术书槽位）----------
     implementation fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}:api")

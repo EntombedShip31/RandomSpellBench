@@ -61,10 +61,16 @@ public final class ModEvents {
         SpellbookCatalog.get();
         Config.invalidateWeightCache();
         // 旧版本 maxSpells 默认 10；升级后 ForgeConfigSpec 不会重置已存在的 key，
-        // 把残留的 10 自动迁移到当前默认 12，确保上限符合新版本设计。
+        // 把残留的 10 自动迁移到 v1.0.4 的默认 12。
         if (Config.SERVER.maxSpells.get() == 10) {
             Config.SERVER.maxSpells.set(12);
             RandomSpellPVP.LOGGER.info("Migrated randomspellbench-server.maxSpells from legacy default 10 to 12");
+        }
+        // v1.0.5：上限对齐 ISS 原版 spellbook create 指令的 20 个栏位（轮盘可完整展示），
+        // 把 v1.0.4 残留的 12 自动迁移到 20。
+        if (Config.SERVER.maxSpells.get() == 12) {
+            Config.SERVER.maxSpells.set(20);
+            RandomSpellPVP.LOGGER.info("Migrated randomspellbench-server.maxSpells from legacy default 12 to 20");
         }
     }
 }

@@ -10,13 +10,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 简单的滚动面板：内容超出可视区域时启用滚轮 + 滚动条。
+ * 简单的滚动面板：内容超出可视区域时启用滚轮滚动。
  *
  * <ul>
  *   <li>内部 children <b>不</b> addRenderableWidget（由 ScrollPanel 自己转发鼠标事件），
  *       避免 Screen 双重渲染。</li>
  *   <li>渲染时对所有 child 应用 translate(0, -scrollOffset) + scissor(自身区域)，
  *       溢出部分被裁剪，不污染相邻面板。</li>
+ *   <li>v1.0.6 起移除滚动条：竖条会遮挡右侧按钮（如「拆下卷轴」），
+ *       滚动全部交给鼠标滚轮（指针悬停在面板任意位置即可滚动，无需瞄准滚动条）。</li>
  *   <li>无对象分配热路径。</li>
  * </ul>
  */
@@ -154,7 +156,7 @@ public class ScrollPanel extends AbstractWidget {
 
     @Override
     protected void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        // 每帧同步内容高度/滚动条：任何时刻的控件可见性与 y 重排（如 reflow 操作按钮、
+        // 每帧同步内容高度/滚动范围：任何时刻的控件可见性与 y 重排（如 reflow 操作按钮、
         // 区段显隐）都立即反映到滚动范围，避免“内容溢出却滚不到底”的显示不全问题
         layout();
         // 内容裁剪到本面板区域，避免溢出
@@ -169,22 +171,7 @@ public class ScrollPanel extends AbstractWidget {
             g.pose().popPose();
             g.disableScissor();
         }
-        if (showScrollbar) {
-            renderScrollbar(g);
-        }
-    }
-
-    private void renderScrollbar(GuiGraphics g) {
-        int tx = getX() + getWidth() - 5;
-        int ty = getY();
-        int th = getHeight();
-        g.fill(tx, ty, tx + 5, ty + th, 0x66302008);
-        int visible = getHeight();
-        int thumbH = Math.max(10, th * visible / Math.max(1, contentHeight));
-        int maxOffset = Math.max(1, contentHeight - visible);
-        int thumbY = ty + (int) Math.round((double) (th - thumbH) * scrollOffset / maxOffset);
-        g.fill(tx, thumbY, tx + 5, thumbY + thumbH, 0xFFFFA53D);
-        g.fill(tx, thumbY, tx + 5, thumbY + 1, 0xFFFFC97A);
+        // 不再绘制滚动条：竖条遮挡按钮，滚动由鼠标滚轮完成（见 mouseScrolled）
     }
 
     @Override

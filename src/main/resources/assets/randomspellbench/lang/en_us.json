@@ -63,6 +63,7 @@
   "screen.randomspellbench.tip_rarity": "Rarity: %s",
 
   "screen.randomspellbench.fixed_hint": "Fixed Lv%s (all spells)",
+  "screen.randomspellbench.scroll_batch_capped": "%s spells checked; at most %s scrolls per batch",
   "screen.randomspellbench.preview_failed": "Spell preview unavailable (iss_ponder not loaded)",
   "screen.randomspellbench.preview_failed_timeout": "Spell preview timed out (server did not respond); returned to the bench",
   "screen.randomspellbench.preview_loading": "Loading spell preview...",
@@ -76,6 +77,8 @@
   "command.randomspellbench.usage": "Usage: /rsta config | randomize | undo | extract [hand|curio] | imbue <spell> [level] [target] | unimbue [target] | scroll <spell> [level] | learn <spell> | unlock | lock | reload",
   "command.randomspellbench.reloaded": "Reloaded: %s spells, %s spellbooks",
   "command.randomspellbench.scroll.done": "Created scroll for %s (Lv%s)",
+  "command.randomspellbench.scroll.batch_done": "Batch-created %s scroll(s)",
+  "command.randomspellbench.scroll.batch_done_dropped": "Batch-created %s scroll(s) (%s dropped: inventory full)",
   "command.randomspellbench.error.no_scroll": "No scroll from Iron's Spells 'n Spellbooks was found",
   "command.randomspellbench.error.spell_not_found": "Spell not found (invalid id or disabled)",
   "command.randomspellbench.error.creative_only": "This mod is creative-mode only. Run %s to bypass",
@@ -97,6 +100,11 @@
 
   "command.randomspellbench.imbue.done": "Imbued %s (Lv%s) into %s (hold or wear it to cast from the spell wheel)",
   "command.randomspellbench.imbue.book_done": "Wrote %s (Lv%s) into the %s",
+  "command.randomspellbench.imbue.batch_done": "Imbued %s spell(s) into %s",
+  "command.randomspellbench.imbue.batch_done_skipped": "Imbued %s spell(s) into %s (skipped %s: per-item imbue limit reached)",
+  "command.randomspellbench.imbue.batch_book_done": "Wrote %s spell(s) into the %s",
+  "command.randomspellbench.imbue.batch_book_done_skipped": "Wrote %s spell(s) into the %s (skipped %s: spellbook full)",
+  "command.randomspellbench.error.imbue_over_limit": "Imbued spells exceed the equipment limit (%s spells on this item, limit %s)",
   "command.randomspellbench.unimbue.done": "Cleared the imbued spell on %s",
   "command.randomspellbench.error.imbue_bad_target": "Invalid imbue target: %s (use mainhand / offhand / head / chest / legs / feet / spellbook)",
   "command.randomspellbench.error.imbue_no_item": "Nothing in the %s slot to imbue",

@@ -63,6 +63,7 @@
   "screen.randomspellbench.tip_rarity": "稀有度: %s",
 
   "screen.randomspellbench.fixed_hint": "固定等级 Lv%s（所有法术）",
+  "screen.randomspellbench.scroll_batch_capped": "勾选了 %s 个法术，单次最多生成 %s 张卷轴",
   "screen.randomspellbench.preview_failed": "法术预览不可用（iss_ponder 未正确加载）",
   "screen.randomspellbench.preview_failed_timeout": "法术预览加载超时（服务端未响应），已返回测试台",
   "screen.randomspellbench.preview_loading": "正在加载法术预览…",
@@ -76,6 +77,8 @@
   "command.randomspellbench.usage": "用法: /rsta config | randomize | undo | extract [hand|curio] | imbue <法术> [等级] [目标] | unimbue [目标] | scroll <法术> [等级] | learn <法术> | unlock | lock | reload",
   "command.randomspellbench.reloaded": "已重新加载：%s 个法术、%s 本法术书",
   "command.randomspellbench.scroll.done": "已生成 %s (Lv%s) 的卷轴",
+  "command.randomspellbench.scroll.batch_done": "已批量生成 %s 张卷轴",
+  "command.randomspellbench.scroll.batch_done_dropped": "已批量生成 %s 张卷轴（背包已满，%s 张掉在地上）",
   "command.randomspellbench.error.no_scroll": "没有找到铁魔法模组的法术卷轴",
   "command.randomspellbench.error.spell_not_found": "找不到该法术（id 无效或已被禁用）",
   "command.randomspellbench.error.creative_only": "本模组仅限创造模式使用。输入 %s 解除限制",
@@ -97,6 +100,11 @@
 
   "command.randomspellbench.imbue.done": "已把 %s (Lv%s) 注入到%s（手持 / 穿戴即可在法术轮盘施放）",
   "command.randomspellbench.imbue.book_done": "已把 %s (Lv%s) 写入%s",
+  "command.randomspellbench.imbue.batch_done": "已把 %s 个法术注入到%s",
+  "command.randomspellbench.imbue.batch_done_skipped": "已把 %s 个法术注入到%s（跳过 %s 个：已达单物品注入上限）",
+  "command.randomspellbench.imbue.batch_book_done": "已把 %s 个法术写入%s",
+  "command.randomspellbench.imbue.batch_book_done_skipped": "已把 %s 个法术写入%s（跳过 %s 个：法术书栏位已满）",
+  "command.randomspellbench.error.imbue_over_limit": "注入法术超过装备上限（该物品已有 %s 个法术，上限 %s 个）",
   "command.randomspellbench.unimbue.done": "已清除%s上的注入法术",
   "command.randomspellbench.error.imbue_bad_target": "目标槽位无效：%s（可选 mainhand / offhand / head / chest / legs / feet / spellbook）",
   "command.randomspellbench.error.imbue_no_item": "%s 槽位没有物品，无法注入",

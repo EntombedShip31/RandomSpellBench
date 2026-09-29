@@ -15,6 +15,8 @@ import com.randomspellbench.client.gui.widget.SliderWidget;
 import com.randomspellbench.client.gui.widget.SpellListWidget;
 import com.randomspellbench.network.NetworkHandler;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
+import com.randomspellbench.network.packet.C2SBatchImbuePacket;
+import com.randomspellbench.network.packet.C2SBatchSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
@@ -58,7 +60,9 @@ import java.util.List;
  * - 法术池管理（搜索 / 施法类型过滤 / 全选清除 / 每学派至少 1 个）
  * - 等级规则（范围随机 / 固定等级）
  * - 选中法术的独立等级范围（fixed 模式下滑块置灰并给出提示）
- * - 生成卷轴 / 长按学习 / 预览 / 复现上次
+ * - 生成卷轴 / 注入法术（v1.0.5 起按「勾选的法术」批量执行：勾 1 个 = 单个行为，
+ *   勾多个 = 一次网络包批量；卷轴单次 ≤12 张，注入受单物品上限约束）
+ * - 长按学习 / 预览 / 复现上次
  * - 注入 / 拆卷轴：7 个槽位按钮一键直达（主 / 副 / 头 / 胸 / 腿 / 脚 / 书），
  *   把选中法术写进该槽位物品（书 = 写入饰品栏法术书，书满了会拒绝），
  *   或把该槽位物品上的法术拆成卷轴放进背包
@@ -73,6 +77,9 @@ public class SpellConfigScreen extends Screen {
     // ---------- 橙色主题 ----------
     private static final int COLOR_ACCENT = 0xFFFF8C00;
     private static final int COLOR_ACCENT_DARK = 0xFFB35C00;
+    /** 切换按钮激活态辉光：内圈实线（亮绿）与外圈柔光（半透明绿）。 */
+    private static final int COLOR_TOGGLE_ON = 0xFF8FE86B;
+    private static final int COLOR_TOGGLE_GLOW = 0x668FE86B;
     private static final int COLOR_LABEL = 0xFFFFB566;
     private static final int COLOR_TEXT = 0xFFF5E6D0;
     private static final int COLOR_FRAME = 0xFF8A4F12;
@@ -722,11 +729,46 @@ public class SpellConfigScreen extends Screen {
         closeIfConfigured();
     }
 
+    /**
+     * 当前「勾选（启用）」的法术集合，按左侧列表顺序。
+     * 「生成卷轴 / 注入法术」按钮批量处理的就是这批法术：
+     * 勾选 1 个 = 旧的单个行为；勾选多个 = 一次网络包批量执行。
+     */
+    private List<AbstractSpell> enabledSpells() {
+        List<AbstractSpell> out = new ArrayList<>();
+        if (pool != null) {
+            for (AbstractSpell spell : pool) {
+                if (config.isSpellEnabled(spell)) {
+                    out.add(spell);
+                }
+            }
+        }
+        return out;
+    }
+
     private void spawnSelectedScroll() {
-        if (selectedSpell == null) {
+        List<AbstractSpell> checked = enabledSpells();
+        if (checked.size() > 1) {
+            // 批量：勾选的每个法术各生成一张卷轴，单次上限 12 张（超出部分客户端截断并提示）
+            int n = Math.min(checked.size(), C2SBatchSpawnScrollPacket.MAX_SCROLLS);
+            List<String> ids = new ArrayList<>(n);
+            for (int i = 0; i < n; i++) {
+                ids.add(checked.get(i).getSpellId());
+            }
+            NetworkHandler.sendToServer(new C2SBatchSpawnScrollPacket(ids));
+            if (checked.size() > n) {
+                mc().player.displayClientMessage(Component.translatable(
+                        "screen.randomspellbench.scroll_batch_capped", checked.size(), n), true);
+            }
+        } else if (checked.size() == 1) {
+            // 只勾选了一个 = 旧的「单个生成」行为
+            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(checked.get(0).getSpellId(), 0));
+        } else if (selectedSpell != null) {
+            // 全部取消勾选时的兜底：按当前选中的法术生成一张
+            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(selectedSpell.getSpellId(), 0));
+        } else {
             return;
         }
-        NetworkHandler.sendToServer(new C2SSpawnScrollPacket(selectedSpell.getSpellId(), 0));
         closeIfConfigured();
     }
 
@@ -737,19 +779,37 @@ public class SpellConfigScreen extends Screen {
     }
 
     /**
-     * 注入选中的法术到目标槽位的物品。
-     * 等级沿用「等级规则」的下限（固定等级模式即固定等级），与「点击思索」预览用同一取值，
-     * 避免玩家在 GUI 里看到的等级和实际注入的等级不是同一个。
+     * 注入勾选的法术到目标槽位的物品。
      *
-     * 不关界面：注入结果走 actionbar，且玩家通常要连着换目标/换法术继续注。
+     * <p>批量语义（v1.0.5 起）：勾选 1 个 = 旧的「注入选中法术」；
+     * 勾选多个 = 一次网络包批量注入，装备位受「单物品上限」（默认 3）约束，
+     * 装不下的由服务端跳过并汇总播报；物品本身已超上限时服务端报
+     * 「注入法术超过装备上限」。</p>
+     *
+     * <p>等级沿用「等级规则」的下限（固定等级模式即固定等级），与「点击思索」预览用同一取值。
+     * 不关界面：注入结果走 actionbar / 聊天栏，且玩家通常要连着换目标 / 换法术继续注。</p>
      */
     private void imbueSelected() {
-        if (selectedSpell == null) {
+        List<AbstractSpell> checked = enabledSpells();
+        if (checked.isEmpty()) {
+            // 全部取消勾选时的兜底：注入当前选中的法术
+            if (selectedSpell == null) {
+                return;
+            }
+            checked = List.of(selectedSpell);
+        }
+        if (checked.size() == 1) {
+            AbstractSpell spell = checked.get(0);
+            int level = config.effectiveRange(spell).getMinLevel();
+            NetworkHandler.sendToServer(new C2SImbueSpellPacket(
+                    C2SImbueSpellPacket.Action.IMBUE, spell.getSpellId(), level, imbueTarget.key()));
             return;
         }
-        int level = config.effectiveRange(selectedSpell).getMinLevel();
-        NetworkHandler.sendToServer(new C2SImbueSpellPacket(
-                C2SImbueSpellPacket.Action.IMBUE, selectedSpell.getSpellId(), level, imbueTarget.key()));
+        List<String> ids = new ArrayList<>(checked.size());
+        for (AbstractSpell spell : checked) {
+            ids.add(spell.getSpellId());
+        }
+        NetworkHandler.sendToServer(new C2SBatchImbuePacket(ids, imbueTarget.key()));
     }
 
     /**
@@ -844,12 +904,16 @@ public class SpellConfigScreen extends Screen {
         spellMinSlider.active = showSpellSection;
         spellMaxSlider.active = showSpellSection;
 
-        scrollButton.active = hasSelection;
+        // 「生成卷轴 / 注入法术」按勾选的法术执行：勾选 1 个 = 单个行为，多个 = 批量。
+        // 全部取消勾选时兜底用选中的法术，因此有勾选或选中其一即可用
+        int enabledCount = pool == null ? 0 : config.enabledSpellCount(pool);
+        boolean hasTarget = enabledCount > 0 || hasSelection;
+        scrollButton.active = hasTarget;
         previewButton.active = hasSelection;
         learnButton.active = hasSelection && isEldritch(selectedSpell);
         repeatButton.active = !ClientConfigData.getLastResult().isEmpty();
-        // 注入需要选中法术；拆下卷轴不需要（只跟目标槽位有关），因此始终可用
-        imbueButton.active = hasSelection;
+        // 注入需要勾选（或兜底选中）法术；拆下卷轴不需要（只跟目标槽位有关），因此始终可用
+        imbueButton.active = hasTarget;
         extractTargetButton.active = true;
         for (Button slot : imbueTargetButtons.values()) {
             slot.active = true;
@@ -868,9 +932,8 @@ public class SpellConfigScreen extends Screen {
         imbueButton.visible = true;
         extractTargetButton.visible = true;
 
-        minOnePerSchoolButton.setMessage(Component.literal(
-                config.isMinOnePerSchool() ? "[x] " : "[ ] ")
-                .append(Component.translatable("screen.randomspellbench.min_one_per_school")));
+        minOnePerSchoolButton.setMessage(Component.translatable("screen.randomspellbench.min_one_per_school")
+                .withStyle(config.isMinOnePerSchool() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
 
         // 部位按钮：选中的白字，其余灰色（选中态的橙色描边在渲染层补，见 drawImbueTargetHighlight）
         for (Map.Entry<ImbueTarget, Button> entry : imbueTargetButtons.entrySet()) {
@@ -885,11 +948,11 @@ public class SpellConfigScreen extends Screen {
             int maxLevel = Math.max(1, selectedSpell.getMaxLevel());
             spellMinSlider.setBounds(1, maxLevel, effective.getMinLevel());
             spellMaxSlider.setBounds(1, maxLevel, effective.getMaxLevel());
-            useGlobalButton.setMessage(Component.literal(filter.isUseGlobalRange() ? "[x] " : "[ ] ")
-                    .append(Component.translatable("screen.randomspellbench.use_global")));
+            useGlobalButton.setMessage(Component.translatable("screen.randomspellbench.use_global")
+                    .withStyle(filter.isUseGlobalRange() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
         } else {
-            useGlobalButton.setMessage(Component.literal("[ ] ")
-                    .append(Component.translatable("screen.randomspellbench.use_global")));
+            useGlobalButton.setMessage(Component.translatable("screen.randomspellbench.use_global")
+                    .withStyle(ChatFormatting.GRAY));
         }
 
         // 长按学习按钮（仅远古巫术显示），提示按住时长（已删除 Shift=全部 批量逻辑）
@@ -1033,6 +1096,7 @@ public class SpellConfigScreen extends Screen {
             drawLongPressProgress(g);
             drawPreviewProgress(g);
             drawImbueTargetHighlight(g);
+            drawToggleHighlights(g);
         } finally {
             g.pose().popPose();
             g.disableScissor();
@@ -1180,6 +1244,32 @@ public class SpellConfigScreen extends Screen {
         int x = selected.getX();
         int y = selected.getY();
         drawBorder(g, x, y, x + selected.getWidth(), y + selected.getHeight(), COLOR_ACCENT);
+    }
+
+    /**
+     * 激活态切换按钮（「每学派至少 1 个」「使用全局等级」）的绿色辉光描边。
+     * 替代旧版的「[x] 」文字前缀：开 = 绿字 + 辉光边框，关 = 灰字无边框。
+     * 辉光 = 三层由外向内、透明度递增的描边，模拟柔光溢出效果。
+     */
+    private void drawToggleHighlights(GuiGraphics g) {
+        if (minOnePerSchoolButton.visible && config.isMinOnePerSchool()) {
+            drawGlowBorder(g, minOnePerSchoolButton);
+        }
+        if (useGlobalButton.visible && selectedSpell != null
+                && config.getFilter(selectedSpell).isUseGlobalRange()) {
+            drawGlowBorder(g, useGlobalButton);
+        }
+    }
+
+    private void drawGlowBorder(GuiGraphics g, Button button) {
+        int x0 = button.getX() - 1;
+        int y0 = button.getY() - 1;
+        int x1 = button.getX() + button.getWidth() + 1;
+        int y1 = button.getY() + button.getHeight() + 1;
+        // 外圈 → 内圈：透明度递增，模拟辉光溢出
+        drawBorder(g, x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_TOGGLE_GLOW);
+        drawBorder(g, x0, y0, x1, y1, COLOR_TOGGLE_GLOW);
+        drawBorder(g, x0 + 1, y0 + 1, x1 - 1, y1 - 1, COLOR_TOGGLE_ON);
     }
 
     private void drawSectionLabel(GuiGraphics g, String key, int x, int y) {

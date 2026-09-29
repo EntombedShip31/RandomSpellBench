@@ -30,3 +30,6 @@ iss_ponder-forge1.20.1-1.0.3-all.jar
 # ========== OS ==========
 Thumbs.db
 .DS_Store
+
+# ========== 工作区本地数据（WorkBuddy 会话数据，不入库）==========
+.workbuddy/

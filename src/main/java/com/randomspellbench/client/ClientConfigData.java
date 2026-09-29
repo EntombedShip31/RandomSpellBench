@@ -12,7 +12,7 @@ import java.util.List;
  */
 public final class ClientConfigData {
     private static PlayerSpellConfig config = new PlayerSpellConfig();
-    private static int maxSpells = 12;
+    private static int maxSpells = 20;
     private static boolean assigned = false;
     private static final List<AssignedSpell> lastResult = new ArrayList<>();
     /** 每次收到服务端同步递增，GUI 据此检测是否需要刷新显示。 */

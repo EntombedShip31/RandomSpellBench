@@ -390,6 +390,213 @@ public final class SpellImbueManager {
         return stack;
     }
 
+    // ---------------- 批量注入 ----------------
+
+    /**
+     * 把一批（勾选的）法术批量注入到目标槽位（GUI「注入法术」按钮在勾选数 &gt; 1 时走这里）。
+     *
+     * <p>上限规则：
+     * <ul>
+     *   <li>装备位（主 / 副 / 头 / 胸 / 腿 / 脚）：受服务端配置 {@code maxSpellsPerItem}
+     *       （默认 3）约束。能装几个装几个，装不下的跳过并在汇总播报里说明；
+     *       物品<b>本身</b>的注入法术数已经超过上限时（例如用指令塞了 5 个），
+     *       整单拒绝并提示「注入法术超过装备上限」；恰好装满时提示槽位已满。</li>
+     *   <li>书（饰品栏法术书）：容量上限 = 服务端配置 {@code maxSpells}（默认 20），
+     *       语义与单发注入一致（重复法术原地替换、不占新栏位）。</li>
+     * </ul>
+     * 等级沿用每个法术各自的「等级规则」下限（固定等级模式即固定等级）。
+     * 整批只做一次物品写回与一次容器同步；写入完成前物品不会被改动。</p>
+     */
+    public static Result imbueBatch(ServerPlayer player, List<AbstractSpell> spells, ImbueTarget target) {
+        if (!PermissionHelper.canUse(player)) {
+            return Result.fail("command.randomspellbench.error.creative_only",
+                    Component.translatable("command.randomspellbench.unlock.hint"));
+        }
+        if (spells == null || spells.isEmpty()) {
+            return Result.fail("command.randomspellbench.error.spell_not_found");
+        }
+        if (target == null) {
+            return Result.fail("command.randomspellbench.error.imbue_bad_target", "");
+        }
+        if (target == ImbueTarget.SPELLBOOK) {
+            return imbueBookBatch(player, spells);
+        }
+        return imbueEquipmentBatch(player, spells, target);
+    }
+
+    /** 批量注入到装备位（武器 / 盔甲 / 饰品）。 */
+    private static Result imbueEquipmentBatch(ServerPlayer player, List<AbstractSpell> spells, ImbueTarget target) {
+        ItemStack current = target.getStack(player);
+        if (current.isEmpty()) {
+            return Result.fail("command.randomspellbench.error.imbue_no_item", targetName(target));
+        }
+        if (!isImbueable(current)) {
+            return Result.fail("command.randomspellbench.error.imbue_not_imbueable", current.getHoverName());
+        }
+        int cap = Math.max(1, Config.SERVER.imbueMaxSpells.get());
+
+        ItemStack stack = current.copy();
+        ISpellContainerMutable mutable;
+        int active;
+        if (Config.SERVER.imbueAppend.get() && ISpellContainer.isSpellContainer(stack)) {
+            ISpellContainer existing = ISpellContainer.get(stack);
+            if (existing == null) {
+                // 理论不会发生（前面已判定是容器），兜底按全新注入处理
+                mutable = null;
+                active = 0;
+            } else {
+                mutable = existing.mutableCopy();
+                active = mutable.getActiveSpellCount();
+                // 物品本身的注入法术数已经超过上限：整单拒绝（用户明确要求的提示）
+                if (active > cap) {
+                    return Result.fail("command.randomspellbench.error.imbue_over_limit", active, cap);
+                }
+            }
+        } else {
+            mutable = null;
+            active = 0;
+        }
+
+        if (mutable == null) {
+            // 全新物品：第一个法术走 ISS 官方入口（createImbuedContainer 决定 mustEquip / 轮盘语义），
+            // 之后的法术在该容器上继续追加（受 cap 约束）
+            ItemStack seeded = applyImbue(stack, spells.get(0),
+                    clampLevel(player, spells.get(0)));
+            if (seeded == null) {
+                return Result.fail("command.randomspellbench.error.imbue_full", cap);
+            }
+            stack = seeded;
+            ISpellContainer seededContainer = ISpellContainer.get(stack);
+            if (seededContainer == null) {
+                return Result.fail("command.randomspellbench.error.imbue_full", cap);
+            }
+            mutable = seededContainer.mutableCopy();
+            active = mutable.getActiveSpellCount();
+        }
+
+        int budget = cap - active; // 还能新增几个法术（>=0；重复法术原地替换不占预算）
+        // 覆盖模式（appendToExisting=false）：与单个注入语义一致，整件物品只保留 seeded 的这一个法术
+        if (!Config.SERVER.imbueAppend.get()) {
+            budget = 0;
+        }
+        int success = 0;
+        int skipped = 0;
+        for (AbstractSpell spell : spells) {
+            int lv = clampLevel(player, spell);
+            int occupied = mutable.getIndexForSpell(spell);
+            if (occupied >= 0) {
+                // 已在装备上：原地替换等级，不占新槽位
+                mutable.removeSpellAtIndex(occupied);
+                if (mutable.addSpellAtIndex(spell, lv, occupied, true)) {
+                    success++;
+                } else {
+                    skipped++;
+                }
+                continue;
+            }
+            int index = mutable.getNextAvailableIndex();
+            if (index < 0) {
+                index = mutable.getActiveSpellCount();
+            }
+            if (budget <= 0 || index >= cap) {
+                skipped++;
+                continue;
+            }
+            if (index >= mutable.getMaxSpellCount()) {
+                mutable.setMaxSpellCount(index + 1);
+            }
+            if (!mutable.addSpellAtIndex(spell, lv, index, true)) {
+                skipped++;
+                continue;
+            }
+            budget--;
+            success++;
+        }
+
+        if (success == 0) {
+            // 一个都放不进去：超过上限 → 「注入法术超过装备上限」；恰好装满 → 「槽位已满」
+            return active > cap
+                    ? Result.fail("command.randomspellbench.error.imbue_over_limit", active, cap)
+                    : Result.fail("command.randomspellbench.error.imbue_full", cap);
+        }
+
+        ISpellContainer.set(stack, mutable.toImmutable());
+        target.setStack(player, stack);
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        return Result.ok(skipped > 0
+                        ? "command.randomspellbench.imbue.batch_done_skipped"
+                        : "command.randomspellbench.imbue.batch_done",
+                success, targetName(target), skipped);
+    }
+
+    /** 批量写入饰品栏法术书（容量上限 = 服务端 maxSpells，默认 20）。 */
+    private static Result imbueBookBatch(ServerPlayer player, List<AbstractSpell> spells) {
+        ItemStack book = EquipmentManager.getEquippedSpellbook(player);
+        if (book.isEmpty() || !SpellbookDismantler.isSpellbook(book)) {
+            return Result.fail("command.randomspellbench.error.no_spellbook_curio");
+        }
+        ItemStack copy = book.copy();
+        ISpellContainerMutable mutable;
+        if (ISpellContainer.isSpellContainer(copy) && ISpellContainer.get(copy) != null) {
+            mutable = ISpellContainer.get(copy).mutableCopy();
+        } else {
+            // 空白的法术书还没写入过容器：按测试台的默认书初始化
+            mutable = ISpellContainer.create(1, true, true).mutableCopy();
+        }
+        int cap = Math.max(1, Config.SERVER.maxSpells.get());
+        int active = mutable.getActiveSpellCount();
+
+        int success = 0;
+        int skipped = 0;
+        for (AbstractSpell spell : spells) {
+            int maxLevel = Math.max(1, spell.getMaxLevel());
+            int lv = Mth.clamp(defaultLevel(player, spell), 1, maxLevel);
+            int occupied = mutable.getIndexForSpell(spell);
+            if (occupied >= 0) {
+                // 已在书里：原地替换等级，不占新栏位
+                mutable.removeSpellAtIndex(occupied);
+                if (mutable.addSpellAtIndex(spell, lv, occupied, false)) {
+                    success++;
+                } else {
+                    skipped++;
+                }
+                continue;
+            }
+            if (active >= cap) {
+                skipped++;
+                continue;
+            }
+            int index = active; // 与单发注入一致：接到末尾
+            if (index >= mutable.getMaxSpellCount()) {
+                mutable.setMaxSpellCount(index + 1);
+            }
+            if (!mutable.addSpellAtIndex(spell, lv, index, false)) {
+                skipped++;
+                continue;
+            }
+            active++;
+            success++;
+        }
+
+        if (success == 0) {
+            return Result.fail("command.randomspellbench.error.imbue_book_full", cap);
+        }
+        ISpellContainer.set(copy, mutable.toImmutable());
+        EquipmentManager.applySpellbook(player, copy);
+        player.getInventory().setChanged();
+        player.inventoryMenu.broadcastChanges();
+        return Result.ok(skipped > 0
+                        ? "command.randomspellbench.imbue.batch_book_done_skipped"
+                        : "command.randomspellbench.imbue.batch_book_done",
+                success, targetName(ImbueTarget.SPELLBOOK), skipped);
+    }
+
+    /** 批量注入的默认等级：等级规则下限，并夹到该法术的合法等级区间内。 */
+    private static int clampLevel(ServerPlayer player, AbstractSpell spell) {
+        return Mth.clamp(defaultLevel(player, spell), 1, Math.max(1, spell.getMaxLevel()));
+    }
+
     // ---------------- 判定 ----------------
 
     /**

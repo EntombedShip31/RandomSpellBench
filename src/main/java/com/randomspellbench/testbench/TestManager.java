@@ -18,6 +18,7 @@ import net.minecraft.network.chat.TextColor;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -119,6 +120,54 @@ public final class TestManager {
         }
         feedback(player, Component.translatable("command.randomspellbench.scroll.done",
                 spell.getDisplayName(player), lv), true);
+    }
+
+    /**
+     * 批量生成勾选法术的卷轴（GUI「生成卷轴」按钮在勾选数 &gt; 1 时走这里）。
+     *
+     * <p>防卡顿：调用方（C2SBatchSpawnScrollPacket）已经把整批法术装在一个网络包里，
+     * 这里在单次主线程调用内顺序生成全部卷轴、统一入背包、只播报一次汇总——
+     * 避免逐个发包带来的多次权限校验 / 背包同步 / actionbar 刷屏。
+     * 单个法术生成失败时整批取消（与拆卷轴的「先预生成再落地」同一安全边界）。</p>
+     *
+     * <p>数量上限 {@value #MAX_BATCH_SCROLLS} 张：客户端已截断，这里再兜底截断一次
+     * （防伪造包刷物品），超出部分静默丢弃。</p>
+     */
+    public static final int MAX_BATCH_SCROLLS = 12;
+
+    public static void spawnScrolls(ServerPlayer player, List<AbstractSpell> spells) {
+        if (!PermissionHelper.canUse(player)) {
+            feedback(player, PermissionHelper.creativeOnlyMessage(), false);
+            return;
+        }
+        int n = Math.min(spells.size(), MAX_BATCH_SCROLLS);
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+
+        // 先全部预生成，任何一个失败就整批取消（此时一个卷轴都没给出去）
+        List<ItemStack> scrolls = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            AbstractSpell spell = spells.get(i);
+            int lv = config.effectiveRange(spell).randomLevel(player.getRandom());
+            ItemStack scroll = RandomAssignmentEngine.buildScroll(spell, lv, player, player.getRandom());
+            if (scroll.isEmpty()) {
+                feedback(player, Component.translatable("command.randomspellbench.error.no_scroll"), true);
+                return;
+            }
+            scrolls.add(scroll);
+        }
+
+        int dropped = 0;
+        for (ItemStack scroll : scrolls) {
+            if (!player.getInventory().add(scroll)) {
+                player.level().addFreshEntity(new net.minecraft.world.entity.item.ItemEntity(
+                        player.level(), player.getX(), player.getY() + 0.5, player.getZ(), scroll));
+                dropped++;
+            }
+        }
+        feedback(player, Component.translatable(dropped > 0
+                ? "command.randomspellbench.scroll.batch_done_dropped"
+                : "command.randomspellbench.scroll.batch_done",
+                scrolls.size(), dropped), true);
     }
 
     /**

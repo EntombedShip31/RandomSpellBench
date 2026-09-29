@@ -78,8 +78,10 @@ public final class Config {
             b.pop();
 
             b.comment("随机分配规则").push("random");
-            maxSpells = b.defineInRange("maxSpells", 12, 1, 16);
-            defaultSpellCount = b.defineInRange("defaultSpellCount", 6, 1, 16);
+            // 上限 20 = Iron's Spells 原版 /irons_spellbooks spellbook create <slots> 指令允许的最大栏位数，
+            // 法术轮盘可完整展示；GUI 的「法术数量」滑条最大值跟随本配置
+            maxSpells = b.defineInRange("maxSpells", 20, 1, 20);
+            defaultSpellCount = b.defineInRange("defaultSpellCount", 6, 1, 20);
             defaultMinLevel = b.defineInRange("defaultMinLevel", 1, 1, 20);
             defaultMaxLevel = b.defineInRange("defaultMaxLevel", 10, 1, 20);
             defaultAssignMode = b.defineEnum("defaultAssignMode", AssignMode.RANDOM);
