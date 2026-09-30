@@ -100,8 +100,13 @@ public final class TestManager {
         afterAssign(player, config, result.spells());
     }
 
-    /** 把选中法术生成成 ISS 卷轴并交给玩家（背包优先，放不下丢脚下）。 */
-    public static void spawnScroll(ServerPlayer player, AbstractSpell spell, int level) {
+    /**
+     * 把选中法术生成成 ISS 卷轴交给玩家。
+     *
+     * @param mainhand true = 直接替换主手（原主手回背包，满则丢脚下）——测试连发免翻背包；
+     *                 false = 普通入背包（满则丢脚下）
+     */
+    public static void spawnScroll(ServerPlayer player, AbstractSpell spell, int level, boolean mainhand) {
         if (!PermissionHelper.canUse(player)) {
             feedback(player, PermissionHelper.creativeOnlyMessage(), false);
             return;
@@ -113,11 +118,7 @@ public final class TestManager {
             feedback(player, Component.translatable("command.randomspellbench.error.no_scroll"), true);
             return;
         }
-        boolean added = player.getInventory().add(scroll);
-        if (!added) {
-            player.level().addFreshEntity(new net.minecraft.world.entity.item.ItemEntity(
-                    player.level(), player.getX(), player.getY() + 0.5, player.getZ(), scroll));
-        }
+        giveScroll(player, scroll, mainhand);
         feedback(player, Component.translatable("command.randomspellbench.scroll.done",
                 spell.getDisplayName(player), lv), true);
     }
@@ -132,10 +133,14 @@ public final class TestManager {
      *
      * <p>数量上限 {@value #MAX_BATCH_SCROLLS} 张：客户端已截断，这里再兜底截断一次
      * （防伪造包刷物品），超出部分静默丢弃。</p>
+     *
+     * @param levelOverride &gt;0 时整批用该固定等级（/rsta scroll all &lt;等级&gt;），
+     *                      否则每个法术按自己的「等级规则」随机（固定等级模式即固定等级）
+     * @param mainhand      true = 每张卷轴直接替换主手（原主手回背包），false = 普通入背包
      */
     public static final int MAX_BATCH_SCROLLS = 12;
 
-    public static void spawnScrolls(ServerPlayer player, List<AbstractSpell> spells) {
+    public static void spawnScrolls(ServerPlayer player, List<AbstractSpell> spells, int levelOverride, boolean mainhand) {
         if (!PermissionHelper.canUse(player)) {
             feedback(player, PermissionHelper.creativeOnlyMessage(), false);
             return;
@@ -147,7 +152,8 @@ public final class TestManager {
         List<ItemStack> scrolls = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             AbstractSpell spell = spells.get(i);
-            int lv = config.effectiveRange(spell).randomLevel(player.getRandom());
+            int lv = levelOverride > 0 ? levelOverride
+                    : config.effectiveRange(spell).randomLevel(player.getRandom());
             ItemStack scroll = RandomAssignmentEngine.buildScroll(spell, lv, player, player.getRandom());
             if (scroll.isEmpty()) {
                 feedback(player, Component.translatable("command.randomspellbench.error.no_scroll"), true);
@@ -158,9 +164,7 @@ public final class TestManager {
 
         int dropped = 0;
         for (ItemStack scroll : scrolls) {
-            if (!player.getInventory().add(scroll)) {
-                player.level().addFreshEntity(new net.minecraft.world.entity.item.ItemEntity(
-                        player.level(), player.getX(), player.getY() + 0.5, player.getZ(), scroll));
+            if (!giveScroll(player, scroll, mainhand)) {
                 dropped++;
             }
         }
@@ -168,6 +172,36 @@ public final class TestManager {
                 ? "command.randomspellbench.scroll.batch_done_dropped"
                 : "command.randomspellbench.scroll.batch_done",
                 scrolls.size(), dropped), true);
+    }
+
+    /**
+     * 把一张卷轴交给玩家。
+     *
+     * @return false = 有物品掉在了脚下（背包放不下 / 主手原物品回背包失败）
+     */
+    private static boolean giveScroll(ServerPlayer player, ItemStack scroll, boolean toMainhand) {
+        if (toMainhand) {
+            int slot = player.getInventory().selected;
+            ItemStack old = player.getInventory().getItem(slot);
+            player.getInventory().setItem(slot, scroll);
+            player.getInventory().setChanged();
+            if (!old.isEmpty() && !player.getInventory().add(old)) {
+                dropAtFeet(player, old);
+                return false;
+            }
+            return true;
+        }
+        if (!player.getInventory().add(scroll)) {
+            dropAtFeet(player, scroll);
+            return false;
+        }
+        return true;
+    }
+
+    /** 背包满时的兜底：直接丢在玩家脚下（带拾取延迟，避免瞬间被自己吸回去）。 */
+    private static void dropAtFeet(ServerPlayer player, ItemStack stack) {
+        player.level().addFreshEntity(new net.minecraft.world.entity.item.ItemEntity(
+                player.level(), player.getX(), player.getY() + 0.5, player.getZ(), stack));
     }
 
     /**

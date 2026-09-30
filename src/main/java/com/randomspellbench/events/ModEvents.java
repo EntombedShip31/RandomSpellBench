@@ -9,6 +9,7 @@ import com.randomspellbench.spell.SpellPoolManager;
 import com.randomspellbench.spell.SpellbookCatalog;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -51,9 +52,34 @@ public final class ModEvents {
         }
     }
 
+    /**
+     * 「法术无冷却」（测试开关）：开启的玩家每 10 tick（0.5 秒）清空一次 ISS 冷却。
+     *
+     * <p>开关状态在玩家配置 NBT 里（{@code PlayerSpellConfig.isNoCooldown()}），
+     * 关闭即恢复原版冷却，无残留状态；每 0.5 秒一次足够「冷却永远为零」的观感，
+     * 且避免逐 tick 空转。 ISS 的冷却入口与 {@code ClearCooldownCommand} 相同：
+     * {@code MagicData.getPlayerMagicData(p).getPlayerCooldowns()} 的 clear + syncToPlayer，
+     * 全部位于 ISS api 包，可直接调用（免 Mixin / 反射）。</p>
+     */
     @SubscribeEvent
-    public static void onServerStarting(ServerStartingEvent event) {
-        // 服务器启动时重建并预热缓存：把注册表扫描放到启动阶段，
+    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || !(event.player instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!player.isAlive() || player.tickCount % 10 != 0) {
+            return;
+        }
+        if (!PlayerConfigStore.get(player).isNoCooldown()) {
+            return;
+        }
+        io.redspace.ironsspellbooks.api.magic.MagicData magicData =
+                io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(player);
+        magicData.getPlayerCooldowns().clearCooldowns();
+        magicData.getPlayerCooldowns().syncToPlayer(player);
+    }
+
+    @SubscribeEvent
+    public static void onServerStarting(ServerStartingEvent event) {        // 服务器启动时重建并预热缓存：把注册表扫描放到启动阶段，
         // 避免玩家首次打开 GUI 时在客户端渲染线程上触发一次性扫描（卡顿）
         SpellPoolManager.invalidate();
         SpellPoolManager.getAvailableSpells();

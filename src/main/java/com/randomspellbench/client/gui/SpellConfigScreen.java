@@ -18,6 +18,7 @@ import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
 import com.randomspellbench.network.packet.C2SBatchImbuePacket;
 import com.randomspellbench.network.packet.C2SBatchSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
+import com.randomspellbench.network.packet.C2SSetNoCooldownPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2STestActionPacket;
@@ -77,9 +78,8 @@ public class SpellConfigScreen extends Screen {
     // ---------- 橙色主题 ----------
     private static final int COLOR_ACCENT = 0xFFFF8C00;
     private static final int COLOR_ACCENT_DARK = 0xFFB35C00;
-    /** 切换按钮激活态辉光：内圈实线（亮绿）与外圈柔光（半透明绿）。 */
+    /** 切换按钮激活态：内圈实线（亮绿单线描边，v1.0.7 去掉外圈柔光层）。 */
     private static final int COLOR_TOGGLE_ON = 0xFF8FE86B;
-    private static final int COLOR_TOGGLE_GLOW = 0x668FE86B;
     private static final int COLOR_LABEL = 0xFFFFB566;
     private static final int COLOR_TEXT = 0xFFF5E6D0;
     private static final int COLOR_FRAME = 0xFF8A4F12;
@@ -160,6 +160,9 @@ public class SpellConfigScreen extends Screen {
     private Button learnButton;
     private Button previewButton;
     private Button repeatButton;
+
+    /** 「法术无冷却」测试开关（服务端周期清冷却，见 ModEvents#onPlayerTick）。 */
+    private Button noCooldownButton;
 
     /**
      * 注入 / 拆卷轴的目标槽位。纯客户端本地状态：服务端不保存该选择；
@@ -367,6 +370,11 @@ public class SpellConfigScreen extends Screen {
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
         repeatButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_repeat"), b -> repeatLast())
+                .bounds(rx, scrollY0, rw, ROW_H).build());
+
+        // 「法术无冷却」测试开关：开启后服务端每 0.5 秒清一次 ISS 冷却，关闭即恢复原版。
+        // 排在「操作」区段末尾（复现上次之后），激活态 = 绿字 + 绿色描边（与其它切换按钮一致）
+        noCooldownButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> toggleNoCooldown())
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
         // —— 底部固定：随机分配 + 关闭（始终可见，不参与滚动）——
@@ -619,6 +627,14 @@ public class SpellConfigScreen extends Screen {
         refreshDetail();
     }
 
+    /** 切换「法术无冷却」：状态在服务端玩家配置里（持久化 + 随 S2CSyncConfigPacket 回流）。 */
+    private void toggleNoCooldown() {
+        NetworkHandler.sendToServer(new C2SSetNoCooldownPacket(!config.isNoCooldown()));
+        // 本地先行反馈，服务端真实状态随下次配置同步回流
+        config.setNoCooldown(!config.isNoCooldown());
+        refreshDetail();
+    }
+
     private void onGlobalRangeChanged() {
         double min = globalMinSlider.getValue();
         if (min > globalMaxSlider.getValue()) {
@@ -730,14 +746,19 @@ public class SpellConfigScreen extends Screen {
     }
 
     /**
-     * 当前「勾选（启用）」的法术集合，按左侧列表顺序。
-     * 「生成卷轴 / 注入法术」按钮批量处理的就是这批法术：
-     * 勾选 1 个 = 旧的单个行为；勾选多个 = 一次网络包批量执行。
+     * 当前「勾选（启用）」的法术集合——**跟随搜索范围**：
+     * 搜索框过滤后批量只作用于「屏幕上看得见的法术 ∩ 勾选」，搜什么测什么；
+     * 搜索为空时可见列表 = 整个池子，行为退化为「全部勾选的法术」。
+     *
+     * <p>「生成卷轴 / 注入法术」按钮批量处理的就是这批法术：
+     * 勾选 1 个 = 旧的单个行为；勾选多个 = 一次网络包批量执行。</p>
      */
     private List<AbstractSpell> enabledSpells() {
+        List<AbstractSpell> scope = spellList != null && !spellList.getVisible().isEmpty()
+                ? spellList.getVisible() : pool;
         List<AbstractSpell> out = new ArrayList<>();
-        if (pool != null) {
-            for (AbstractSpell spell : pool) {
+        if (scope != null) {
+            for (AbstractSpell spell : scope) {
                 if (config.isSpellEnabled(spell)) {
                     out.add(spell);
                 }
@@ -748,6 +769,7 @@ public class SpellConfigScreen extends Screen {
 
     private void spawnSelectedScroll() {
         List<AbstractSpell> checked = enabledSpells();
+        boolean mainhand = Config.CLIENT.autoScrollMainhand.get();
         if (checked.size() > 1) {
             // 批量：勾选的每个法术各生成一张卷轴，单次上限 12 张（超出部分客户端截断并提示）
             int n = Math.min(checked.size(), C2SBatchSpawnScrollPacket.MAX_SCROLLS);
@@ -755,17 +777,17 @@ public class SpellConfigScreen extends Screen {
             for (int i = 0; i < n; i++) {
                 ids.add(checked.get(i).getSpellId());
             }
-            NetworkHandler.sendToServer(new C2SBatchSpawnScrollPacket(ids));
+            NetworkHandler.sendToServer(new C2SBatchSpawnScrollPacket(ids, mainhand));
             if (checked.size() > n) {
                 mc().player.displayClientMessage(Component.translatable(
                         "screen.randomspellbench.scroll_batch_capped", checked.size(), n), true);
             }
         } else if (checked.size() == 1) {
             // 只勾选了一个 = 旧的「单个生成」行为
-            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(checked.get(0).getSpellId(), 0));
+            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(checked.get(0).getSpellId(), 0, mainhand));
         } else if (selectedSpell != null) {
             // 全部取消勾选时的兜底：按当前选中的法术生成一张
-            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(selectedSpell.getSpellId(), 0));
+            NetworkHandler.sendToServer(new C2SSpawnScrollPacket(selectedSpell.getSpellId(), 0, mainhand));
         } else {
             return;
         }
@@ -804,6 +826,11 @@ public class SpellConfigScreen extends Screen {
             NetworkHandler.sendToServer(new C2SImbueSpellPacket(
                     C2SImbueSpellPacket.Action.IMBUE, spell.getSpellId(), level, imbueTarget.key()));
             return;
+        }
+        if (checked.size() > C2SBatchImbuePacket.MAX_SPELLS) {
+            mc().player.displayClientMessage(Component.translatable(
+                    "screen.randomspellbench.imbue_batch_capped", checked.size(),
+                    C2SBatchImbuePacket.MAX_SPELLS), true);
         }
         List<String> ids = new ArrayList<>(checked.size());
         for (AbstractSpell spell : checked) {
@@ -935,6 +962,9 @@ public class SpellConfigScreen extends Screen {
         minOnePerSchoolButton.setMessage(Component.translatable("screen.randomspellbench.min_one_per_school")
                 .withStyle(config.isMinOnePerSchool() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
 
+        noCooldownButton.setMessage(Component.translatable("screen.randomspellbench.toggle_no_cooldown")
+                .withStyle(config.isNoCooldown() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
+
         // 部位按钮：选中的白字，其余灰色（选中态的橙色描边在渲染层补，见 drawImbueTargetHighlight）
         for (Map.Entry<ImbueTarget, Button> entry : imbueTargetButtons.entrySet()) {
             boolean current = entry.getKey() == imbueTarget;
@@ -1025,6 +1055,8 @@ public class SpellConfigScreen extends Screen {
         y = place(learnButton, y, ROW_H);
         y = place(previewButton, y, ROW_H);
         y = place(repeatButton, y, ROW_H);
+        // 「法术无冷却」开关：操作区末尾，始终可见
+        y = place(noCooldownButton, y, ROW_H);
 
         // 重算内容高度与滚动范围（新 Y 立即生效）
         rightScrollPanel.layout();
@@ -1126,6 +1158,11 @@ public class SpellConfigScreen extends Screen {
                 leftPanelX0 + 8, leftPanelY0 + 4, COLOR_ACCENT, false);
         g.drawString(font, Component.translatable("screen.randomspellbench.right_title").getString(),
                 rightPanelX0 + 8, rightPanelY0 + 4, COLOR_ACCENT, false);
+        // 左侧标题行右侧的勾选角标（淡金色小字）：承担原批量按钮 ×N 的信息量
+        String checkedLabel = Component.translatable("screen.randomspellbench.checked_count",
+                pool == null ? 0 : config.enabledSpellCount(pool)).getString();
+        g.drawString(font, checkedLabel,
+                leftPanelX1 - 8 - font.width(checkedLabel), leftPanelY0 + 4, 0x66FFD699, false);
         if (searchBox.getValue().isEmpty() && !searchBox.isFocused()) {
             g.drawString(font, Component.translatable("screen.randomspellbench.search").getString(),
                     searchBox.getX() + 4, searchBox.getY() + 3, 0xFF80705A, false);
@@ -1247,29 +1284,26 @@ public class SpellConfigScreen extends Screen {
     }
 
     /**
-     * 激活态切换按钮（「每学派至少 1 个」「使用全局等级」）的绿色辉光描边。
-     * 替代旧版的「[x] 」文字前缀：开 = 绿字 + 辉光边框，关 = 灰字无边框。
-     * 辉光 = 三层由外向内、透明度递增的描边，模拟柔光溢出效果。
+     * 激活态切换按钮（「每学派至少 1 个」「使用全局等级」「法术无冷却」）的绿色描边。
+     * 替代旧版的「[x] 」文字前缀：开 = 绿字 + 绿色描边，关 = 灰字无边框。
+     * （v1.0.7 起去掉外圈柔光层——观感发虚，保留干净的单线绿框。）
      */
     private void drawToggleHighlights(GuiGraphics g) {
         if (minOnePerSchoolButton.visible && config.isMinOnePerSchool()) {
-            drawGlowBorder(g, minOnePerSchoolButton);
+            drawToggleBorder(g, minOnePerSchoolButton);
         }
         if (useGlobalButton.visible && selectedSpell != null
                 && config.getFilter(selectedSpell).isUseGlobalRange()) {
-            drawGlowBorder(g, useGlobalButton);
+            drawToggleBorder(g, useGlobalButton);
+        }
+        if (noCooldownButton.visible && config.isNoCooldown()) {
+            drawToggleBorder(g, noCooldownButton);
         }
     }
 
-    private void drawGlowBorder(GuiGraphics g, Button button) {
-        int x0 = button.getX() - 1;
-        int y0 = button.getY() - 1;
-        int x1 = button.getX() + button.getWidth() + 1;
-        int y1 = button.getY() + button.getHeight() + 1;
-        // 外圈 → 内圈：透明度递增，模拟辉光溢出
-        drawBorder(g, x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_TOGGLE_GLOW);
-        drawBorder(g, x0, y0, x1, y1, COLOR_TOGGLE_GLOW);
-        drawBorder(g, x0 + 1, y0 + 1, x1 - 1, y1 - 1, COLOR_TOGGLE_ON);
+    private void drawToggleBorder(GuiGraphics g, Button button) {
+        drawBorder(g, button.getX(), button.getY(),
+                button.getX() + button.getWidth(), button.getY() + button.getHeight(), COLOR_TOGGLE_ON);
     }
 
     private void drawSectionLabel(GuiGraphics g, String key, int x, int y) {

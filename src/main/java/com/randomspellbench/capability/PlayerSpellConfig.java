@@ -29,6 +29,7 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
     private static final String KEY_FIXED_LEVEL = "FixedLevel";
     private static final String KEY_CURSOR = "Cursor"; // 旧字段（顺序遍历），保留读以兼容旧存档
     private static final String KEY_MIN_ONE_PER_SCHOOL = "MinOnePerSchool";
+    private static final String KEY_NO_COOLDOWN = "NoCooldown";
     private static final String KEY_BYPASS_CREATIVE_ONLY = "BypassCreativeOnly";
 
     private final Map<String, SpellFilter> filters = new LinkedHashMap<>();
@@ -48,6 +49,8 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
     private boolean bypassCreativeOnly = false;
     /** 随机时每学派至少抽 1 个。 */
     private boolean minOnePerSchool = Config.SERVER.defaultMinOnePerSchool.get();
+    /** 法术无冷却（测试用）：开启时服务端周期性清空 ISS 冷却，关闭即恢复原版冷却。 */
+    private boolean noCooldown = false;
 
     public PlayerSpellConfig() {
     }
@@ -158,6 +161,14 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         this.minOnePerSchool = minOnePerSchool;
     }
 
+    public boolean isNoCooldown() {
+        return noCooldown;
+    }
+
+    public void setNoCooldown(boolean noCooldown) {
+        this.noCooldown = noCooldown;
+    }
+
     // ---------- 创造模式限制 ----------
 
     public boolean isBypassCreativeOnly() {
@@ -224,6 +235,7 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         tag.putString(KEY_LEVEL_MODE, levelMode.name());
         tag.putInt(KEY_FIXED_LEVEL, fixedLevel);
         tag.putBoolean(KEY_MIN_ONE_PER_SCHOOL, minOnePerSchool);
+        tag.putBoolean(KEY_NO_COOLDOWN, noCooldown);
         tag.putBoolean(KEY_BYPASS_CREATIVE_ONLY, bypassCreativeOnly);
 
         tag.put(KEY_ASSIGNED_SPELLS, writeSpellList(assignedSpells));
@@ -255,6 +267,7 @@ public class PlayerSpellConfig implements INBTSerializable<CompoundTag> {
         fixedLevel = tag.contains(KEY_FIXED_LEVEL) ? Math.max(1, tag.getInt(KEY_FIXED_LEVEL))
                 : Config.SERVER.defaultFixedLevel.get();
         minOnePerSchool = tag.getBoolean(KEY_MIN_ONE_PER_SCHOOL);
+        noCooldown = tag.getBoolean(KEY_NO_COOLDOWN);
         bypassCreativeOnly = tag.getBoolean(KEY_BYPASS_CREATIVE_ONLY);
 
         assignedSpells = readSpellList(tag.getCompound(KEY_ASSIGNED_SPELLS));

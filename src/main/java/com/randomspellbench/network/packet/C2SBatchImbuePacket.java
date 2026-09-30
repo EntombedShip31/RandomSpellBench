@@ -27,8 +27,11 @@ import java.util.function.Supplier;
  * 与单发注入 / 点击思索的预览等级保持同一来源。</p>
  */
 public class C2SBatchImbuePacket {
-    /** 防伪造包：单次最多注入的法术数（装备上限默认 3，这里放宽到 16 留配置余量）。 */
-    private static final int MAX_BATCH = 16;
+    /**
+     * 防伪造包：单次最多注入的法术数。
+     * 上限对齐书容量 20（{@code maxSpells} 的配置上限）——装备上限默认 3，书的批量一次最多写 20 个。
+     */
+    public static final int MAX_SPELLS = 20;
 
     private final List<String> spellIds;
     /** {@link ImbueTarget#key()}。 */
@@ -40,7 +43,7 @@ public class C2SBatchImbuePacket {
     }
 
     public static void encode(C2SBatchImbuePacket msg, FriendlyByteBuf buf) {
-        int n = Math.min(msg.spellIds.size(), MAX_BATCH);
+        int n = Math.min(msg.spellIds.size(), MAX_SPELLS);
         buf.writeVarInt(n);
         for (int i = 0; i < n; i++) {
             buf.writeUtf(msg.spellIds.get(i));
@@ -49,7 +52,7 @@ public class C2SBatchImbuePacket {
     }
 
     public static C2SBatchImbuePacket decode(FriendlyByteBuf buf) {
-        int n = Math.min(buf.readVarInt(), MAX_BATCH);
+        int n = Math.min(buf.readVarInt(), MAX_SPELLS);
         List<String> ids = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             ids.add(buf.readUtf());

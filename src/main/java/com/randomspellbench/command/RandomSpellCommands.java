@@ -10,7 +10,6 @@ import com.randomspellbench.capability.PlayerConfigStore;
 import com.randomspellbench.capability.PlayerSpellConfig;
 import com.randomspellbench.events.PermissionHelper;
 import com.randomspellbench.network.NetworkHandler;
-import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
 import com.randomspellbench.network.packet.S2CCloseScreenPacket;
 import com.randomspellbench.network.packet.S2COpenScreenPacket;
 import com.randomspellbench.network.packet.S2CSyncConfigPacket;
@@ -32,6 +31,7 @@ import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * 命令：/rsta
@@ -98,11 +98,17 @@ public final class RandomSpellCommands {
                                 .suggests(IMBUE_TARGET_SUGGESTIONS)
                                 .executes(RandomSpellCommands::unimbueTarget)))
                 .then(Commands.literal("scroll")
+                        .then(Commands.literal("all")
+                                .executes(RandomSpellCommands::scrollAllDefault)
+                                .then(Commands.argument("level", IntegerArgumentType.integer(1, 20))
+                                        .executes(RandomSpellCommands::scrollAllWithLevel)))
                         .then(Commands.argument("spell", StringArgumentType.word())
                                 .suggests(SPELL_SUGGESTIONS)
                                 .executes(RandomSpellCommands::scrollDefault)
                                 .then(Commands.argument("level", IntegerArgumentType.integer(1, 20))
                                         .executes(RandomSpellCommands::scrollWithLevel))))
+                .then(Commands.literal("nocd")
+                        .executes(RandomSpellCommands::toggleNoCooldown))
                 .then(Commands.literal("learn")
                         .then(Commands.argument("spell", StringArgumentType.word())
                                 .suggests(SPELL_SUGGESTIONS)
@@ -268,7 +274,10 @@ public final class RandomSpellCommands {
             player.sendSystemMessage(Component.translatable("command.randomspellbench.error.spell_not_found"));
             return 0;
         }
-        NetworkHandler.sendToPlayer(new C2SSpawnScrollPacket(spell.getSpellId(), 0), player);
+        // v1.0.7 修复：旧实现把 C2S 包用 sendToPlayer 发回客户端再由客户端回发——
+        // 而该包注册为 PLAY_TO_SERVER，客户端 handle 时 sender 为 null 直接 return，指令实际是静默无效的。
+        // 现改为服务端直接调用 TestManager（同权限校验、同播报）。
+        TestManager.spawnScroll(player, spell, 0, false);
         return 1;
     }
 
@@ -280,7 +289,58 @@ public final class RandomSpellCommands {
             return 0;
         }
         int level = IntegerArgumentType.getInteger(ctx, "level");
-        NetworkHandler.sendToPlayer(new C2SSpawnScrollPacket(spell.getSpellId(), level), player);
+        TestManager.spawnScroll(player, spell, level, false);
+        return 1;
+    }
+
+    /** /rsta scroll all：给勾选（启用）的法术各生成一张卷轴，单次上限 12 张。 */
+    private static int scrollAllDefault(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return scrollAll(ctx, 0);
+    }
+
+    private static int scrollAllWithLevel(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        return scrollAll(ctx, IntegerArgumentType.getInteger(ctx, "level"));
+    }
+
+    private static int scrollAll(CommandContext<CommandSourceStack> ctx, int level) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        if (!PermissionHelper.canUse(player)) {
+            player.sendSystemMessage(PermissionHelper.creativeOnlyMessage());
+            return 0;
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        List<AbstractSpell> enabled = new java.util.ArrayList<>();
+        for (AbstractSpell spell : SpellPoolManager.getAvailableSpells()) {
+            if (config.isSpellEnabled(spell)) {
+                enabled.add(spell);
+            }
+        }
+        if (enabled.isEmpty()) {
+            player.sendSystemMessage(Component.translatable("command.randomspellbench.error.pool_empty")
+                    .withStyle(ChatFormatting.RED));
+            return 0;
+        }
+        if (enabled.size() > TestManager.MAX_BATCH_SCROLLS) {
+            player.sendSystemMessage(Component.translatable("screen.randomspellbench.scroll_batch_capped",
+                    enabled.size(), TestManager.MAX_BATCH_SCROLLS).withStyle(ChatFormatting.GRAY));
+        }
+        TestManager.spawnScrolls(player, enabled, level, false);
+        return 1;
+    }
+
+    /** /rsta nocd：切换「法术无冷却」测试开关（与 GUI 开关同一状态、同一持久化）。 */
+    private static int toggleNoCooldown(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer player = ctx.getSource().getPlayerOrException();
+        if (!PermissionHelper.canUse(player)) {
+            player.sendSystemMessage(PermissionHelper.creativeOnlyMessage());
+            return 0;
+        }
+        PlayerSpellConfig config = PlayerConfigStore.get(player);
+        config.setNoCooldown(!config.isNoCooldown());
+        PlayerConfigStore.save(player, config);
+        player.sendSystemMessage(Component.translatable(config.isNoCooldown()
+                ? "command.randomspellbench.nocd.on"
+                : "command.randomspellbench.nocd.off").withStyle(ChatFormatting.GREEN));
         return 1;
     }
 

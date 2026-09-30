@@ -4,6 +4,7 @@ import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.network.packet.C2SBatchImbuePacket;
 import com.randomspellbench.network.packet.C2SBatchSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
+import com.randomspellbench.network.packet.C2SSetNoCooldownPacket;
 import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
@@ -83,6 +84,9 @@ public final class NetworkHandler {
                 NetworkDirection.PLAY_TO_SERVER);
         register(++id, C2SBatchImbuePacket.class,
                 C2SBatchImbuePacket::encode, C2SBatchImbuePacket::decode, C2SBatchImbuePacket::handle,
+                NetworkDirection.PLAY_TO_SERVER);
+        register(++id, C2SSetNoCooldownPacket.class,
+                C2SSetNoCooldownPacket::encode, C2SSetNoCooldownPacket::decode, C2SSetNoCooldownPacket::handle,
                 NetworkDirection.PLAY_TO_SERVER);
         // S2C
         register(++id, S2CSyncConfigPacket.class,

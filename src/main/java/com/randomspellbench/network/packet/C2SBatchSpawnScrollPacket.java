@@ -30,14 +30,22 @@ public class C2SBatchSpawnScrollPacket {
     public static final int MAX_SCROLLS = 12;
 
     private final List<String> spellIds;
+    /** true = 每张卷轴直接替换主手（原主手回背包），false = 普通入背包。 */
+    private final boolean mainhand;
 
     public C2SBatchSpawnScrollPacket(List<String> spellIds) {
+        this(spellIds, false);
+    }
+
+    public C2SBatchSpawnScrollPacket(List<String> spellIds, boolean mainhand) {
         this.spellIds = spellIds == null ? List.of() : spellIds;
+        this.mainhand = mainhand;
     }
 
     public static void encode(C2SBatchSpawnScrollPacket msg, FriendlyByteBuf buf) {
         int n = Math.min(msg.spellIds.size(), MAX_SCROLLS);
         buf.writeVarInt(n);
+        buf.writeBoolean(msg.mainhand);
         for (int i = 0; i < n; i++) {
             buf.writeUtf(msg.spellIds.get(i));
         }
@@ -45,11 +53,12 @@ public class C2SBatchSpawnScrollPacket {
 
     public static C2SBatchSpawnScrollPacket decode(FriendlyByteBuf buf) {
         int n = Math.min(buf.readVarInt(), MAX_SCROLLS);
+        boolean mainhand = buf.readBoolean();
         List<String> ids = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             ids.add(buf.readUtf());
         }
-        return new C2SBatchSpawnScrollPacket(ids);
+        return new C2SBatchSpawnScrollPacket(ids, mainhand);
     }
 
     public static void handle(C2SBatchSpawnScrollPacket msg, Supplier<NetworkEvent.Context> contextSupplier) {
@@ -72,7 +81,7 @@ public class C2SBatchSpawnScrollPacket {
                         .withStyle(ChatFormatting.RED));
                 return;
             }
-            TestManager.spawnScrolls(player, spells);
+            TestManager.spawnScrolls(player, spells, 0, msg.mainhand);
         });
         ctx.setPacketHandled(true);
     }

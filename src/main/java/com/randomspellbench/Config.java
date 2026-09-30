@@ -118,11 +118,15 @@ public final class Config {
     public static final class Client {
         public final ForgeConfigSpec.BooleanValue closeScreenAfterRandomize;
         public final ForgeConfigSpec.BooleanValue pauseScreen;
+        /** 生成卷轴后直接替换主手（原主手回背包）——测试连发免翻背包。 */
+        public final ForgeConfigSpec.BooleanValue autoScrollMainhand;
 
         Client(ForgeConfigSpec.Builder b) {
             b.comment("界面交互").push("ui");
             closeScreenAfterRandomize = b.define("closeScreenAfterRandomize", true);
             pauseScreen = b.define("pauseScreen", true);
+            autoScrollMainhand = b.comment("生成卷轴后直接替换主手物品（原主手回背包）")
+                    .define("autoScrollMainhand", true);
             b.pop();
         }
     }

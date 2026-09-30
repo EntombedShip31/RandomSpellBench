@@ -471,14 +471,10 @@ public final class SpellImbueManager {
                 return Result.fail("command.randomspellbench.error.imbue_full", cap);
             }
             mutable = seededContainer.mutableCopy();
-            active = mutable.getActiveSpellCount();
         }
 
-        int budget = cap - active; // 还能新增几个法术（>=0；重复法术原地替换不占预算）
         // 覆盖模式（appendToExisting=false）：与单个注入语义一致，整件物品只保留 seeded 的这一个法术
-        if (!Config.SERVER.imbueAppend.get()) {
-            budget = 0;
-        }
+        boolean allowNewSpells = Config.SERVER.imbueAppend.get();
         int success = 0;
         int skipped = 0;
         for (AbstractSpell spell : spells) {
@@ -494,11 +490,17 @@ public final class SpellImbueManager {
                 }
                 continue;
             }
+            // 新法术：覆盖模式直接跳过；容量按「已占用数」判定（与空洞无关），
+            // 写入位置优先取容器返回的空槽（可能是拆卷轴留下的空洞），否则接末尾
+            if (!allowNewSpells || mutable.getActiveSpellCount() >= cap) {
+                skipped++;
+                continue;
+            }
             int index = mutable.getNextAvailableIndex();
             if (index < 0) {
                 index = mutable.getActiveSpellCount();
             }
-            if (budget <= 0 || index >= cap) {
+            if (index >= cap) {
                 skipped++;
                 continue;
             }
@@ -509,14 +511,14 @@ public final class SpellImbueManager {
                 skipped++;
                 continue;
             }
-            budget--;
             success++;
         }
 
         if (success == 0) {
             // 一个都放不进去：超过上限 → 「注入法术超过装备上限」；恰好装满 → 「槽位已满」
-            return active > cap
-                    ? Result.fail("command.randomspellbench.error.imbue_over_limit", active, cap)
+            int finalActive = mutable.getActiveSpellCount();
+            return finalActive > cap
+                    ? Result.fail("command.randomspellbench.error.imbue_over_limit", finalActive, cap)
                     : Result.fail("command.randomspellbench.error.imbue_full", cap);
         }
 
@@ -545,7 +547,6 @@ public final class SpellImbueManager {
             mutable = ISpellContainer.create(1, true, true).mutableCopy();
         }
         int cap = Math.max(1, Config.SERVER.maxSpells.get());
-        int active = mutable.getActiveSpellCount();
 
         int success = 0;
         int skipped = 0;
@@ -563,11 +564,21 @@ public final class SpellImbueManager {
                 }
                 continue;
             }
+            int active = mutable.getActiveSpellCount();
             if (active >= cap) {
                 skipped++;
                 continue;
             }
-            int index = active; // 与单发注入一致：接到末尾
+            // 与单发注入一致：优先填容器返回的空槽（「拆下卷轴」留下的空洞），
+            // 返回值异常或已在末尾时才接到末尾，避免跳过空洞导致下标错位
+            int index = mutable.getNextAvailableIndex();
+            if (index < 0 || index >= active) {
+                index = active;
+            }
+            if (index >= cap) {
+                skipped++;
+                continue;
+            }
             if (index >= mutable.getMaxSpellCount()) {
                 mutable.setMaxSpellCount(index + 1);
             }
@@ -575,7 +586,6 @@ public final class SpellImbueManager {
                 skipped++;
                 continue;
             }
-            active++;
             success++;
         }
 
