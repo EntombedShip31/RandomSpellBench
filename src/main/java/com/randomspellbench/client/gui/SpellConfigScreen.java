@@ -18,7 +18,6 @@ import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
 import com.randomspellbench.network.packet.C2SBatchImbuePacket;
 import com.randomspellbench.network.packet.C2SBatchSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
-import com.randomspellbench.network.packet.C2SSetNoCooldownPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
 import com.randomspellbench.network.packet.C2SSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2STestActionPacket;
@@ -78,8 +77,6 @@ public class SpellConfigScreen extends Screen {
     // ---------- 橙色主题 ----------
     private static final int COLOR_ACCENT = 0xFFFF8C00;
     private static final int COLOR_ACCENT_DARK = 0xFFB35C00;
-    /** 切换按钮激活态：内圈实线（亮绿单线描边，v1.0.7 去掉外圈柔光层）。 */
-    private static final int COLOR_TOGGLE_ON = 0xFF8FE86B;
     private static final int COLOR_LABEL = 0xFFFFB566;
     private static final int COLOR_TEXT = 0xFFF5E6D0;
     private static final int COLOR_FRAME = 0xFF8A4F12;
@@ -160,9 +157,6 @@ public class SpellConfigScreen extends Screen {
     private Button learnButton;
     private Button previewButton;
     private Button repeatButton;
-
-    /** 「法术无冷却」测试开关（服务端周期清冷却，见 ModEvents#onPlayerTick）。 */
-    private Button noCooldownButton;
 
     /**
      * 注入 / 拆卷轴的目标槽位。纯客户端本地状态：服务端不保存该选择；
@@ -370,11 +364,6 @@ public class SpellConfigScreen extends Screen {
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
         repeatButton = rightScrollPanel.addChild(Button.builder(Component.translatable("screen.randomspellbench.btn_repeat"), b -> repeatLast())
-                .bounds(rx, scrollY0, rw, ROW_H).build());
-
-        // 「法术无冷却」测试开关：开启后服务端每 0.5 秒清一次 ISS 冷却，关闭即恢复原版。
-        // 排在「操作」区段末尾（复现上次之后），激活态 = 绿字 + 绿色描边（与其它切换按钮一致）
-        noCooldownButton = rightScrollPanel.addChild(Button.builder(Component.empty(), b -> toggleNoCooldown())
                 .bounds(rx, scrollY0, rw, ROW_H).build());
 
         // —— 底部固定：随机分配 + 关闭（始终可见，不参与滚动）——
@@ -624,14 +613,6 @@ public class SpellConfigScreen extends Screen {
     private void toggleMinOnePerSchool() {
         config.setMinOnePerSchool(!config.isMinOnePerSchool());
         sendSettings();
-        refreshDetail();
-    }
-
-    /** 切换「法术无冷却」：状态在服务端玩家配置里（持久化 + 随 S2CSyncConfigPacket 回流）。 */
-    private void toggleNoCooldown() {
-        NetworkHandler.sendToServer(new C2SSetNoCooldownPacket(!config.isNoCooldown()));
-        // 本地先行反馈，服务端真实状态随下次配置同步回流
-        config.setNoCooldown(!config.isNoCooldown());
         refreshDetail();
     }
 
@@ -962,9 +943,6 @@ public class SpellConfigScreen extends Screen {
         minOnePerSchoolButton.setMessage(Component.translatable("screen.randomspellbench.min_one_per_school")
                 .withStyle(config.isMinOnePerSchool() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
 
-        noCooldownButton.setMessage(Component.translatable("screen.randomspellbench.toggle_no_cooldown")
-                .withStyle(config.isNoCooldown() ? ChatFormatting.GREEN : ChatFormatting.GRAY));
-
         // 部位按钮：选中的白字，其余灰色（选中态的橙色描边在渲染层补，见 drawImbueTargetHighlight）
         for (Map.Entry<ImbueTarget, Button> entry : imbueTargetButtons.entrySet()) {
             boolean current = entry.getKey() == imbueTarget;
@@ -1055,8 +1033,6 @@ public class SpellConfigScreen extends Screen {
         y = place(learnButton, y, ROW_H);
         y = place(previewButton, y, ROW_H);
         y = place(repeatButton, y, ROW_H);
-        // 「法术无冷却」开关：操作区末尾，始终可见
-        y = place(noCooldownButton, y, ROW_H);
 
         // 重算内容高度与滚动范围（新 Y 立即生效）
         rightScrollPanel.layout();
@@ -1284,9 +1260,9 @@ public class SpellConfigScreen extends Screen {
     }
 
     /**
-     * 激活态切换按钮（「每学派至少 1 个」「使用全局等级」「法术无冷却」）的绿色描边。
-     * 替代旧版的「[x] 」文字前缀：开 = 绿字 + 绿色描边，关 = 灰字无边框。
-     * （v1.0.7 起去掉外圈柔光层——观感发虚，保留干净的单线绿框。）
+     * 激活态切换按钮（「每学派至少 1 个」「使用全局等级」）的**橙色描边**：
+     * 仿照注入部位按钮的选中样式（见 drawImbueTargetHighlight），绿字保留、外框用主题橙。
+     * （v1.0.6 曾用绿色辉光、v1.0.7 改绿色单线，均按反馈在 v1.0.8 统一为橙色描边。）
      */
     private void drawToggleHighlights(GuiGraphics g) {
         if (minOnePerSchoolButton.visible && config.isMinOnePerSchool()) {
@@ -1296,14 +1272,11 @@ public class SpellConfigScreen extends Screen {
                 && config.getFilter(selectedSpell).isUseGlobalRange()) {
             drawToggleBorder(g, useGlobalButton);
         }
-        if (noCooldownButton.visible && config.isNoCooldown()) {
-            drawToggleBorder(g, noCooldownButton);
-        }
     }
 
     private void drawToggleBorder(GuiGraphics g, Button button) {
         drawBorder(g, button.getX(), button.getY(),
-                button.getX() + button.getWidth(), button.getY() + button.getHeight(), COLOR_TOGGLE_ON);
+                button.getX() + button.getWidth(), button.getY() + button.getHeight(), COLOR_ACCENT);
     }
 
     private void drawSectionLabel(GuiGraphics g, String key, int x, int y) {

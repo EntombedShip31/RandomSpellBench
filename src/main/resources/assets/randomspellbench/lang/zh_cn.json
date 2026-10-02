@@ -26,7 +26,6 @@
   "screen.randomspellbench.level_range": "范围随机",
   "screen.randomspellbench.level_fixed": "固定等级",
   "screen.randomspellbench.min_one_per_school": "每学派至少 1 个",
-  "screen.randomspellbench.toggle_no_cooldown": "法术无冷却（测试）",
   "screen.randomspellbench.checked_count": "已勾选 %s",
   "screen.randomspellbench.imbue_batch_capped": "勾选了 %s 个法术，单次最多注入 %s 个",
   "screen.randomspellbench.btn_scroll": "生成卷轴",
@@ -74,14 +73,11 @@
   "screen.randomspellbench.learn_all_sent": "已对 %s 个远古巫术法术发起学习",
 
   "key.randomspellbench.open_config": "打开随机法术测试台",
-  "key.randomspellbench.extract_spells": "一键拆下法术书卷轴",
   "key.categories.randomspellbench": "随机法术测试台",
 
-  "command.randomspellbench.usage": "用法: /rsta config | randomize | undo | extract [hand|curio] | imbue <法术> [等级] [目标] | unimbue [目标] | scroll <法术> [等级] | scroll all [等级] | nocd | learn <法术> | unlock | lock | reload",
+  "command.randomspellbench.usage": "用法: /rsta config | randomize | undo | extract [hand|curio] | imbue <法术> [等级] [目标] | unimbue [目标] | scroll <法术> [等级] | scroll all [等级] | learn <法术> | unlock | lock | reload",
   "command.randomspellbench.reloaded": "已重新加载：%s 个法术、%s 本法术书",
   "command.randomspellbench.error.pool_empty": "勾选的法术池是空的：先在左侧勾选至少一个法术",
-  "command.randomspellbench.nocd.on": "法术无冷却已开启（每 0.5 秒自动清空冷却，测试专用）",
-  "command.randomspellbench.nocd.off": "法术无冷却已关闭（恢复原版冷却）",
   "command.randomspellbench.scroll.done": "已生成 %s (Lv%s) 的卷轴",
   "command.randomspellbench.scroll.batch_done": "已批量生成 %s 张卷轴",
   "command.randomspellbench.scroll.batch_done_dropped": "已批量生成 %s 张卷轴（背包已满，%s 张掉在地上）",

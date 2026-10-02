@@ -107,8 +107,6 @@ public final class RandomSpellCommands {
                                 .executes(RandomSpellCommands::scrollDefault)
                                 .then(Commands.argument("level", IntegerArgumentType.integer(1, 20))
                                         .executes(RandomSpellCommands::scrollWithLevel))))
-                .then(Commands.literal("nocd")
-                        .executes(RandomSpellCommands::toggleNoCooldown))
                 .then(Commands.literal("learn")
                         .then(Commands.argument("spell", StringArgumentType.word())
                                 .suggests(SPELL_SUGGESTIONS)
@@ -325,22 +323,6 @@ public final class RandomSpellCommands {
                     enabled.size(), TestManager.MAX_BATCH_SCROLLS).withStyle(ChatFormatting.GRAY));
         }
         TestManager.spawnScrolls(player, enabled, level, false);
-        return 1;
-    }
-
-    /** /rsta nocd：切换「法术无冷却」测试开关（与 GUI 开关同一状态、同一持久化）。 */
-    private static int toggleNoCooldown(CommandContext<CommandSourceStack> ctx) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
-        ServerPlayer player = ctx.getSource().getPlayerOrException();
-        if (!PermissionHelper.canUse(player)) {
-            player.sendSystemMessage(PermissionHelper.creativeOnlyMessage());
-            return 0;
-        }
-        PlayerSpellConfig config = PlayerConfigStore.get(player);
-        config.setNoCooldown(!config.isNoCooldown());
-        PlayerConfigStore.save(player, config);
-        player.sendSystemMessage(Component.translatable(config.isNoCooldown()
-                ? "command.randomspellbench.nocd.on"
-                : "command.randomspellbench.nocd.off").withStyle(ChatFormatting.GREEN));
         return 1;
     }
 

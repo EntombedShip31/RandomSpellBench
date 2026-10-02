@@ -9,7 +9,6 @@ import com.randomspellbench.spell.SpellPoolManager;
 import com.randomspellbench.spell.SpellbookCatalog;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -53,29 +52,15 @@ public final class ModEvents {
     }
 
     /**
-     * 「法术无冷却」（测试开关）：开启的玩家每 10 tick（0.5 秒）清空一次 ISS 冷却。
-     *
-     * <p>开关状态在玩家配置 NBT 里（{@code PlayerSpellConfig.isNoCooldown()}），
-     * 关闭即恢复原版冷却，无残留状态；每 0.5 秒一次足够「冷却永远为零」的观感，
-     * 且避免逐 tick 空转。 ISS 的冷却入口与 {@code ClearCooldownCommand} 相同：
-     * {@code MagicData.getPlayerMagicData(p).getPlayerCooldowns()} 的 clear + syncToPlayer，
-     * 全部位于 ISS api 包，可直接调用（免 Mixin / 反射）。</p>
+     * 玩家死亡重生是全新的 Player 实体，{@code getPersistentData()} 不会自动带过去——
+     * 这里在 Clone 事件把测试台配置原样复制：/rsta unlock 解除的限制、勾选、等级规则等
+     * 全部跨死亡保留（v1.0.8 修复 unlock 状态死亡丢失的问题）。
      */
     @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || !(event.player instanceof ServerPlayer player)) {
-            return;
+    public static void onPlayerClone(PlayerEvent.Clone event) {
+        if (event.isWasDeath()) {
+            PlayerConfigStore.copy(event.getOriginal(), event.getEntity());
         }
-        if (!player.isAlive() || player.tickCount % 10 != 0) {
-            return;
-        }
-        if (!PlayerConfigStore.get(player).isNoCooldown()) {
-            return;
-        }
-        io.redspace.ironsspellbooks.api.magic.MagicData magicData =
-                io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(player);
-        magicData.getPlayerCooldowns().clearCooldowns();
-        magicData.getPlayerCooldowns().syncToPlayer(player);
     }
 
     @SubscribeEvent

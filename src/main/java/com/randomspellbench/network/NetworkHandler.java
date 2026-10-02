@@ -4,7 +4,6 @@ import com.randomspellbench.RandomSpellPVP;
 import com.randomspellbench.network.packet.C2SBatchImbuePacket;
 import com.randomspellbench.network.packet.C2SBatchSpawnScrollPacket;
 import com.randomspellbench.network.packet.C2SRequestRandomizePacket;
-import com.randomspellbench.network.packet.C2SSetNoCooldownPacket;
 import com.randomspellbench.network.packet.C2SExtractSpellsPacket;
 import com.randomspellbench.network.packet.C2SImbueSpellPacket;
 import com.randomspellbench.network.packet.C2SRequestSyncPacket;
@@ -36,7 +35,9 @@ import java.util.function.Supplier;
  * 客户端仅发送配置变更与请求，所有分配/装备/传送逻辑在服务端执行。
  */
 public final class NetworkHandler {
-    public static final String PROTOCOL_VERSION = "1.0";
+    // v1.0.8 升级到 1.1：v1.0.7 发布过的 C2SSetNoCooldownPacket 在本版被移除，
+    // 该包 id 不再存在——必须强制两侧版本匹配，避免旧客户端向新服务端发送已删除的包 id
+    public static final String PROTOCOL_VERSION = "1.1";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(RandomSpellPVP.MODID, "main"),
@@ -84,9 +85,6 @@ public final class NetworkHandler {
                 NetworkDirection.PLAY_TO_SERVER);
         register(++id, C2SBatchImbuePacket.class,
                 C2SBatchImbuePacket::encode, C2SBatchImbuePacket::decode, C2SBatchImbuePacket::handle,
-                NetworkDirection.PLAY_TO_SERVER);
-        register(++id, C2SSetNoCooldownPacket.class,
-                C2SSetNoCooldownPacket::encode, C2SSetNoCooldownPacket::decode, C2SSetNoCooldownPacket::handle,
                 NetworkDirection.PLAY_TO_SERVER);
         // S2C
         register(++id, S2CSyncConfigPacket.class,

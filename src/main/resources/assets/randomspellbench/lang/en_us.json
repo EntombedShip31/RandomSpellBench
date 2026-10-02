@@ -11,11 +11,9 @@
   "screen.randomspellbench.cast_long": "Long",
   "screen.randomspellbench.select_all": "Select All",
   "screen.randomspellbench.clear_all": "Clear All",
-
   "screen.randomspellbench.section_level": "Level Rule",
   "screen.randomspellbench.section_spell": "Selected Spell",
   "screen.randomspellbench.section_action": "Actions",
-
   "screen.randomspellbench.min_level": "Min Level",
   "screen.randomspellbench.max_level": "Max Level",
   "screen.randomspellbench.fixed_level": "Fixed Level",
@@ -26,7 +24,6 @@
   "screen.randomspellbench.level_range": "Range",
   "screen.randomspellbench.level_fixed": "Fixed",
   "screen.randomspellbench.min_one_per_school": "One per school",
-  "screen.randomspellbench.toggle_no_cooldown": "No Spell Cooldown (test)",
   "screen.randomspellbench.checked_count": "Checked %s",
   "screen.randomspellbench.imbue_batch_capped": "%s spells checked; at most %s imbues per batch",
   "screen.randomspellbench.btn_scroll": "Make Scroll",
@@ -51,20 +48,17 @@
   "screen.randomspellbench.target_short_spellbook": "BK",
   "screen.randomspellbench.btn_close": "Close",
   "screen.randomspellbench.randomize": "Randomize",
-
   "screen.randomspellbench.selected_count": "Selected %s/%s spells",
   "screen.randomspellbench.assigned_status": "Status: %s",
   "screen.randomspellbench.status_assigned": "Assigned",
   "screen.randomspellbench.status_pending": "Not assigned",
   "screen.randomspellbench.last_result": " - last %s",
-
   "screen.randomspellbench.tip_max_level": "Max Level: %s",
   "screen.randomspellbench.tip_mana": "Mana (Lv%s): %s",
   "screen.randomspellbench.tip_cooldown": "Cooldown: %s sec",
   "screen.randomspellbench.tip_cast": "Cast Type: %s",
   "screen.randomspellbench.tip_cast_time": "Cast Time: %s sec",
   "screen.randomspellbench.tip_rarity": "Rarity: %s",
-
   "screen.randomspellbench.fixed_hint": "Fixed Lv%s (all spells)",
   "screen.randomspellbench.scroll_batch_capped": "%s spells checked; at most %s scrolls per batch",
   "screen.randomspellbench.preview_failed": "Spell preview unavailable (iss_ponder not loaded)",
@@ -72,15 +66,10 @@
   "screen.randomspellbench.preview_loading": "Loading spell preview...",
   "screen.randomspellbench.preview_loading_sub": "Preparing the demo scene...",
   "screen.randomspellbench.learn_all_sent": "Sent learn request for %s eldritch spells",
-
   "key.randomspellbench.open_config": "Open Random Spell Test Bench",
-  "key.randomspellbench.extract_spells": "Extract Spellbook Scrolls",
   "key.categories.randomspellbench": "Random Spell Test Bench",
-
-  "command.randomspellbench.usage": "Usage: /rsta config | randomize | undo | extract [hand|curio] | imbue <spell> [level] [target] | unimbue [target] | scroll <spell> [level] | scroll all [level] | nocd | learn <spell> | unlock | lock | reload",
+  "command.randomspellbench.usage": "Usage: /rsta config | randomize | undo | extract [hand|curio] | imbue <spell> [level] [target] | unimbue [target] | scroll <spell> [level] | scroll all [level] | learn <spell> | unlock | lock | reload",
   "command.randomspellbench.error.pool_empty": "The checked spell pool is empty: check at least one spell on the left first",
-  "command.randomspellbench.nocd.on": "No spell cooldown enabled (cooldowns cleared every 0.5s, for testing)",
-  "command.randomspellbench.nocd.off": "No spell cooldown disabled (vanilla cooldowns restored)",
   "command.randomspellbench.reloaded": "Reloaded: %s spells, %s spellbooks",
   "command.randomspellbench.scroll.done": "Created scroll for %s (Lv%s)",
   "command.randomspellbench.scroll.batch_done": "Batch-created %s scroll(s)",
@@ -103,7 +92,6 @@
   "command.randomspellbench.error.spellbook_all_locked": "Every spell in this spellbook is locked and cannot be extracted",
   "command.randomspellbench.error.spellbook_broken": "Extraction failed: invalid spellbook data",
   "command.randomspellbench.error.extract_bad_source": "Source must be hand or curio",
-
   "command.randomspellbench.imbue.done": "Imbued %s (Lv%s) into %s (hold or wear it to cast from the spell wheel)",
   "command.randomspellbench.imbue.book_done": "Wrote %s (Lv%s) into the %s",
   "command.randomspellbench.imbue.batch_done": "Imbued %s spell(s) into %s",
@@ -119,11 +107,9 @@
   "command.randomspellbench.error.imbue_book_full": "The equipped spellbook is full (limit %s spells): extract scrolls first to free slots, or re-randomize",
   "command.randomspellbench.error.imbue_not_imbued": "There is no imbued spell on %s",
   "command.randomspellbench.error.extract_no_item": "Nothing in the %s slot to extract",
-
   "command.randomspellbench.extract.done": "Extracted %s spell scroll(s)",
   "command.randomspellbench.extract.done_dropped": "Extracted %s scroll(s); inventory full, %s dropped on the ground",
   "command.randomspellbench.extract.locked_kept": "(%s locked spell(s) kept in the book)",
   "command.randomspellbench.extract.book_dropped": "(inventory full, the emptied spellbook was dropped on the ground)",
-
   "item.randomspellbench.random_spellbook_named": "%s's Random Spellbook"
 }

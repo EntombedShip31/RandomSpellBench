@@ -28,4 +28,14 @@ public final class PlayerConfigStore {
     public static void save(Player player, PlayerSpellConfig config) {
         player.getPersistentData().put(KEY, config.serializeNBT());
     }
+
+    /**
+     * 在 PlayerEvent.Clone（死亡重生）时把配置原样带到新实体上：
+     * /rsta unlock 的解除状态、勾选、等级规则等都跨死亡保留。
+     */
+    public static void copy(Player from, Player to) {
+        if (from.getPersistentData().contains(KEY)) {
+            to.getPersistentData().put(KEY, from.getPersistentData().getCompound(KEY).copy());
+        }
+    }
 }
